@@ -1,0 +1,1045 @@
+{
+  "generated_at": "2026-10-18T15:01:22",
+  "image": "sample.png",
+  "reference": "reference.txt",
+  "reference_characters": 1699,
+  "reference_words": 209,
+  "single_document_limitation": true,
+  "metric_self_check": {
+    "passed": true,
+    "failures": [],
+    "cases": [
+      {
+        "case": "identical Kannada",
+        "expected_cer": 0.0,
+        "actual_cer": 0.0,
+        "expected_wer": 0.0,
+        "actual_wer": 0.0,
+        "percent_functions_agree": true,
+        "passed": true
+      },
+      {
+        "case": "canonical Unicode difference",
+        "expected_cer": 0.0,
+        "actual_cer": 0.0,
+        "expected_wer": 0.0,
+        "actual_wer": 0.0,
+        "percent_functions_agree": true,
+        "passed": true
+      },
+      {
+        "case": "one character substitution",
+        "expected_cer": 0.3333333333333333,
+        "actual_cer": 0.3333333333333333,
+        "expected_wer": 1.0,
+        "actual_wer": 1.0,
+        "percent_functions_agree": true,
+        "passed": true
+      },
+      {
+        "case": "one character insertion",
+        "expected_cer": 0.3333333333333333,
+        "actual_cer": 0.3333333333333333,
+        "expected_wer": 1.0,
+        "actual_wer": 1.0,
+        "percent_functions_agree": true,
+        "passed": true
+      },
+      {
+        "case": "one character deletion",
+        "expected_cer": 0.25,
+        "actual_cer": 0.25,
+        "expected_wer": 1.0,
+        "actual_wer": 1.0,
+        "percent_functions_agree": true,
+        "passed": true
+      },
+      {
+        "case": "one word substitution",
+        "expected_cer": 0.2,
+        "actual_cer": 0.2,
+        "expected_wer": 0.3333333333333333,
+        "actual_wer": 0.3333333333333333,
+        "percent_functions_agree": true,
+        "passed": true
+      },
+      {
+        "case": "one word deletion",
+        "expected_cer": 0.4,
+        "actual_cer": 0.4,
+        "expected_wer": 0.3333333333333333,
+        "actual_wer": 0.3333333333333333,
+        "percent_functions_agree": true,
+        "passed": true
+      },
+      {
+        "case": "both empty",
+        "expected_cer": 0.0,
+        "actual_cer": 0.0,
+        "expected_wer": 0.0,
+        "actual_wer": 0.0,
+        "percent_functions_agree": true,
+        "passed": true
+      },
+      {
+        "case": "empty reference, non-empty hypothesis",
+        "expected_cer": 1.0,
+        "actual_cer": 1.0,
+        "expected_wer": 1.0,
+        "actual_wer": 1.0,
+        "percent_functions_agree": true,
+        "passed": true
+      },
+      {
+        "case": "Kannada matra deletion",
+        "expected_cer": 0.5,
+        "actual_cer": 0.5,
+        "expected_wer": 1.0,
+        "actual_wer": 1.0,
+        "percent_functions_agree": true,
+        "passed": true
+      }
+    ]
+  },
+  "baseline_reproduction": {
+    "reproduced": true,
+    "compared_rows": 60,
+    "max_abs_difference_pp": 0.005,
+    "tolerance_pp": 0.05,
+    "mismatches": [],
+    "details": [
+      {
+        "preprocessing": "original",
+        "psm": 3,
+        "metric": "custom_cer",
+        "expected": 29.96,
+        "measured": 29.9588,
+        "abs_difference_pp": 0.0012,
+        "within_tolerance": true,
+        "source": "layout_ab_benchmark_results.txt"
+      },
+      {
+        "preprocessing": "original",
+        "psm": 3,
+        "metric": "custom_wer",
+        "expected": 40.19,
+        "measured": 40.1914,
+        "abs_difference_pp": 0.0014,
+        "within_tolerance": true,
+        "source": "layout_ab_benchmark_results.txt"
+      },
+      {
+        "preprocessing": "original",
+        "psm": 3,
+        "metric": "raw_cer",
+        "expected": 29.96,
+        "measured": 29.9588,
+        "abs_difference_pp": 0.0012,
+        "within_tolerance": true,
+        "source": "layout_ab_benchmark_results.txt"
+      },
+      {
+        "preprocessing": "original",
+        "psm": 3,
+        "metric": "raw_wer",
+        "expected": 40.19,
+        "measured": 40.1914,
+        "abs_difference_pp": 0.0014,
+        "within_tolerance": true,
+        "source": "layout_ab_benchmark_results.txt"
+      },
+      {
+        "preprocessing": "original",
+        "psm": 4,
+        "metric": "custom_cer",
+        "expected": 15.77,
+        "measured": 15.774,
+        "abs_difference_pp": 0.004,
+        "within_tolerance": true,
+        "source": "layout_ab_benchmark_results.txt"
+      },
+      {
+        "preprocessing": "original",
+        "psm": 4,
+        "metric": "custom_wer",
+        "expected": 27.75,
+        "measured": 27.7512,
+        "abs_difference_pp": 0.0012,
+        "within_tolerance": true,
+        "source": "layout_ab_benchmark_results.txt"
+      },
+      {
+        "preprocessing": "original",
+        "psm": 4,
+        "metric": "raw_cer",
+        "expected": 17.01,
+        "measured": 17.01,
+        "abs_difference_pp": 0.0,
+        "within_tolerance": true,
+        "source": "layout_ab_benchmark_results.txt"
+      },
+      {
+        "preprocessing": "original",
+        "psm": 4,
+        "metric": "raw_wer",
+        "expected": 27.75,
+        "measured": 27.7512,
+        "abs_difference_pp": 0.0012,
+        "within_tolerance": true,
+        "source": "layout_ab_benchmark_results.txt"
+      },
+      {
+        "preprocessing": "original",
+        "psm": 6,
+        "metric": "custom_cer",
+        "expected": 9.71,
+        "measured": 9.7116,
+        "abs_difference_pp": 0.0016,
+        "within_tolerance": true,
+        "source": "layout_ab_benchmark_results.txt"
+      },
+      {
+        "preprocessing": "original",
+        "psm": 6,
+        "metric": "custom_wer",
+        "expected": 22.97,
+        "measured": 22.9665,
+        "abs_difference_pp": 0.0035,
+        "within_tolerance": true,
+        "source": "layout_ab_benchmark_results.txt"
+      },
+      {
+        "preprocessing": "original",
+        "psm": 6,
+        "metric": "raw_cer",
+        "expected": 9.06,
+        "measured": 9.0642,
+        "abs_difference_pp": 0.0042,
+        "within_tolerance": true,
+        "source": "layout_ab_benchmark_results.txt"
+      },
+      {
+        "preprocessing": "original",
+        "psm": 6,
+        "metric": "raw_wer",
+        "expected": 21.05,
+        "measured": 21.0526,
+        "abs_difference_pp": 0.0026,
+        "within_tolerance": true,
+        "source": "layout_ab_benchmark_results.txt"
+      },
+      {
+        "preprocessing": "contrast",
+        "psm": 3,
+        "metric": "custom_cer",
+        "expected": 13.3,
+        "measured": 13.3019,
+        "abs_difference_pp": 0.0019,
+        "within_tolerance": true,
+        "source": "layout_ab_benchmark_results.txt"
+      },
+      {
+        "preprocessing": "contrast",
+        "psm": 3,
+        "metric": "custom_wer",
+        "expected": 24.4,
+        "measured": 24.4019,
+        "abs_difference_pp": 0.0019,
+        "within_tolerance": true,
+        "source": "layout_ab_benchmark_results.txt"
+      },
+      {
+        "preprocessing": "contrast",
+        "psm": 3,
+        "metric": "raw_cer",
+        "expected": 13.01,
+        "measured": 13.0077,
+        "abs_difference_pp": 0.0023,
+        "within_tolerance": true,
+        "source": "layout_ab_benchmark_results.txt"
+      },
+      {
+        "preprocessing": "contrast",
+        "psm": 3,
+        "metric": "raw_wer",
+        "expected": 22.97,
+        "measured": 22.9665,
+        "abs_difference_pp": 0.0035,
+        "within_tolerance": true,
+        "source": "layout_ab_benchmark_results.txt"
+      },
+      {
+        "preprocessing": "contrast",
+        "psm": 4,
+        "metric": "custom_cer",
+        "expected": 17.42,
+        "measured": 17.422,
+        "abs_difference_pp": 0.002,
+        "within_tolerance": true,
+        "source": "layout_ab_benchmark_results.txt"
+      },
+      {
+        "preprocessing": "contrast",
+        "psm": 4,
+        "metric": "custom_wer",
+        "expected": 27.75,
+        "measured": 27.7512,
+        "abs_difference_pp": 0.0012,
+        "within_tolerance": true,
+        "source": "layout_ab_benchmark_results.txt"
+      },
+      {
+        "preprocessing": "contrast",
+        "psm": 4,
+        "metric": "raw_cer",
+        "expected": 17.13,
+        "measured": 17.1277,
+        "abs_difference_pp": 0.0023,
+        "within_tolerance": true,
+        "source": "layout_ab_benchmark_results.txt"
+      },
+      {
+        "preprocessing": "contrast",
+        "psm": 4,
+        "metric": "raw_wer",
+        "expected": 26.32,
+        "measured": 26.3158,
+        "abs_difference_pp": 0.0042,
+        "within_tolerance": true,
+        "source": "layout_ab_benchmark_results.txt"
+      },
+      {
+        "preprocessing": "contrast",
+        "psm": 6,
+        "metric": "custom_cer",
+        "expected": 10.83,
+        "measured": 10.8299,
+        "abs_difference_pp": 0.0001,
+        "within_tolerance": true,
+        "source": "layout_ab_benchmark_results.txt"
+      },
+      {
+        "preprocessing": "contrast",
+        "psm": 6,
+        "metric": "custom_wer",
+        "expected": 23.44,
+        "measured": 23.445,
+        "abs_difference_pp": 0.005,
+        "within_tolerance": true,
+        "source": "layout_ab_benchmark_results.txt"
+      },
+      {
+        "preprocessing": "contrast",
+        "psm": 6,
+        "metric": "raw_cer",
+        "expected": 9.48,
+        "measured": 9.4762,
+        "abs_difference_pp": 0.0038,
+        "within_tolerance": true,
+        "source": "layout_ab_benchmark_results.txt"
+      },
+      {
+        "preprocessing": "contrast",
+        "psm": 6,
+        "metric": "raw_wer",
+        "expected": 22.49,
+        "measured": 22.488,
+        "abs_difference_pp": 0.002,
+        "within_tolerance": true,
+        "source": "layout_ab_benchmark_results.txt"
+      },
+      {
+        "preprocessing": "grayscale",
+        "psm": 3,
+        "metric": "custom_cer",
+        "expected": 10.48,
+        "measured": 10.4768,
+        "abs_difference_pp": 0.0032,
+        "within_tolerance": true,
+        "source": "layout_ab_benchmark_results.txt"
+      },
+      {
+        "preprocessing": "grayscale",
+        "psm": 3,
+        "metric": "custom_wer",
+        "expected": 22.01,
+        "measured": 22.0096,
+        "abs_difference_pp": 0.0004,
+        "within_tolerance": true,
+        "source": "layout_ab_benchmark_results.txt"
+      },
+      {
+        "preprocessing": "grayscale",
+        "psm": 3,
+        "metric": "raw_cer",
+        "expected": 11.18,
+        "measured": 11.183,
+        "abs_difference_pp": 0.003,
+        "within_tolerance": true,
+        "source": "layout_ab_benchmark_results.txt"
+      },
+      {
+        "preprocessing": "grayscale",
+        "psm": 3,
+        "metric": "raw_wer",
+        "expected": 22.97,
+        "measured": 22.9665,
+        "abs_difference_pp": 0.0035,
+        "within_tolerance": true,
+        "source": "layout_ab_benchmark_results.txt"
+      },
+      {
+        "preprocessing": "grayscale",
+        "psm": 4,
+        "metric": "custom_cer",
+        "expected": 11.65,
+        "measured": 11.6539,
+        "abs_difference_pp": 0.0039,
+        "within_tolerance": true,
+        "source": "layout_ab_benchmark_results.txt"
+      },
+      {
+        "preprocessing": "grayscale",
+        "psm": 4,
+        "metric": "custom_wer",
+        "expected": 23.92,
+        "measured": 23.9234,
+        "abs_difference_pp": 0.0034,
+        "within_tolerance": true,
+        "source": "layout_ab_benchmark_results.txt"
+      },
+      {
+        "preprocessing": "grayscale",
+        "psm": 4,
+        "metric": "raw_cer",
+        "expected": 10.95,
+        "measured": 10.9476,
+        "abs_difference_pp": 0.0024,
+        "within_tolerance": true,
+        "source": "layout_ab_benchmark_results.txt"
+      },
+      {
+        "preprocessing": "grayscale",
+        "psm": 4,
+        "metric": "raw_wer",
+        "expected": 23.44,
+        "measured": 23.445,
+        "abs_difference_pp": 0.005,
+        "within_tolerance": true,
+        "source": "layout_ab_benchmark_results.txt"
+      },
+      {
+        "preprocessing": "grayscale",
+        "psm": 6,
+        "metric": "custom_cer",
+        "expected": 11.24,
+        "measured": 11.2419,
+        "abs_difference_pp": 0.0019,
+        "within_tolerance": true,
+        "source": "layout_ab_benchmark_results.txt"
+      },
+      {
+        "preprocessing": "grayscale",
+        "psm": 6,
+        "metric": "custom_wer",
+        "expected": 24.4,
+        "measured": 24.4019,
+        "abs_difference_pp": 0.0019,
+        "within_tolerance": true,
+        "source": "layout_ab_benchmark_results.txt"
+      },
+      {
+        "preprocessing": "grayscale",
+        "psm": 6,
+        "metric": "raw_cer",
+        "expected": 11.3,
+        "measured": 11.3008,
+        "abs_difference_pp": 0.0008,
+        "within_tolerance": true,
+        "source": "layout_ab_benchmark_results.txt"
+      },
+      {
+        "preprocessing": "grayscale",
+        "psm": 6,
+        "metric": "raw_wer",
+        "expected": 24.4,
+        "measured": 24.4019,
+        "abs_difference_pp": 0.0019,
+        "within_tolerance": true,
+        "source": "layout_ab_benchmark_results.txt"
+      },
+      {
+        "preprocessing": "threshold",
+        "psm": 3,
+        "metric": "custom_cer",
+        "expected": 13.07,
+        "measured": 13.0665,
+        "abs_difference_pp": 0.0035,
+        "within_tolerance": true,
+        "source": "layout_ab_benchmark_results.txt"
+      },
+      {
+        "preprocessing": "threshold",
+        "psm": 3,
+        "metric": "custom_wer",
+        "expected": 32.06,
+        "measured": 32.0574,
+        "abs_difference_pp": 0.0026,
+        "within_tolerance": true,
+        "source": "layout_ab_benchmark_results.txt"
+      },
+      {
+        "preprocessing": "threshold",
+        "psm": 3,
+        "metric": "raw_cer",
+        "expected": 13.6,
+        "measured": 13.5962,
+        "abs_difference_pp": 0.0038,
+        "within_tolerance": true,
+        "source": "layout_ab_benchmark_results.txt"
+      },
+      {
+        "preprocessing": "threshold",
+        "psm": 3,
+        "metric": "raw_wer",
+        "expected": 32.54,
+        "measured": 32.5359,
+        "abs_difference_pp": 0.0041,
+        "within_tolerance": true,
+        "source": "layout_ab_benchmark_results.txt"
+      },
+      {
+        "preprocessing": "threshold",
+        "psm": 4,
+        "metric": "custom_cer",
+        "expected": 13.24,
+        "measured": 13.2431,
+        "abs_difference_pp": 0.0031,
+        "within_tolerance": true,
+        "source": "layout_ab_benchmark_results.txt"
+      },
+      {
+        "preprocessing": "threshold",
+        "psm": 4,
+        "metric": "custom_wer",
+        "expected": 33.01,
+        "measured": 33.0144,
+        "abs_difference_pp": 0.0044,
+        "within_tolerance": true,
+        "source": "layout_ab_benchmark_results.txt"
+      },
+      {
+        "preprocessing": "threshold",
+        "psm": 4,
+        "metric": "raw_cer",
+        "expected": 13.77,
+        "measured": 13.7728,
+        "abs_difference_pp": 0.0028,
+        "within_tolerance": true,
+        "source": "layout_ab_benchmark_results.txt"
+      },
+      {
+        "preprocessing": "threshold",
+        "psm": 4,
+        "metric": "raw_wer",
+        "expected": 33.49,
+        "measured": 33.4928,
+        "abs_difference_pp": 0.0028,
+        "within_tolerance": true,
+        "source": "layout_ab_benchmark_results.txt"
+      },
+      {
+        "preprocessing": "threshold",
+        "psm": 6,
+        "metric": "custom_cer",
+        "expected": 13.24,
+        "measured": 13.2431,
+        "abs_difference_pp": 0.0031,
+        "within_tolerance": true,
+        "source": "layout_ab_benchmark_results.txt"
+      },
+      {
+        "preprocessing": "threshold",
+        "psm": 6,
+        "metric": "custom_wer",
+        "expected": 32.06,
+        "measured": 32.0574,
+        "abs_difference_pp": 0.0026,
+        "within_tolerance": true,
+        "source": "layout_ab_benchmark_results.txt"
+      },
+      {
+        "preprocessing": "threshold",
+        "psm": 6,
+        "metric": "raw_cer",
+        "expected": 13.54,
+        "measured": 13.5374,
+        "abs_difference_pp": 0.0026,
+        "within_tolerance": true,
+        "source": "layout_ab_benchmark_results.txt"
+      },
+      {
+        "preprocessing": "threshold",
+        "psm": 6,
+        "metric": "raw_wer",
+        "expected": 32.54,
+        "measured": 32.5359,
+        "abs_difference_pp": 0.0041,
+        "within_tolerance": true,
+        "source": "layout_ab_benchmark_results.txt"
+      },
+      {
+        "preprocessing": "adaptive",
+        "psm": 3,
+        "metric": "custom_cer",
+        "expected": 12.01,
+        "measured": 12.0071,
+        "abs_difference_pp": 0.0029,
+        "within_tolerance": true,
+        "source": "layout_ab_benchmark_results.txt"
+      },
+      {
+        "preprocessing": "adaptive",
+        "psm": 3,
+        "metric": "custom_wer",
+        "expected": 29.67,
+        "measured": 29.6651,
+        "abs_difference_pp": 0.0049,
+        "within_tolerance": true,
+        "source": "layout_ab_benchmark_results.txt"
+      },
+      {
+        "preprocessing": "adaptive",
+        "psm": 3,
+        "metric": "raw_cer",
+        "expected": 12.3,
+        "measured": 12.3014,
+        "abs_difference_pp": 0.0014,
+        "within_tolerance": true,
+        "source": "layout_ab_benchmark_results.txt"
+      },
+      {
+        "preprocessing": "adaptive",
+        "psm": 3,
+        "metric": "raw_wer",
+        "expected": 29.67,
+        "measured": 29.6651,
+        "abs_difference_pp": 0.0049,
+        "within_tolerance": true,
+        "source": "layout_ab_benchmark_results.txt"
+      },
+      {
+        "preprocessing": "adaptive",
+        "psm": 4,
+        "metric": "custom_cer",
+        "expected": 12.01,
+        "measured": 12.0071,
+        "abs_difference_pp": 0.0029,
+        "within_tolerance": true,
+        "source": "layout_ab_benchmark_results.txt"
+      },
+      {
+        "preprocessing": "adaptive",
+        "psm": 4,
+        "metric": "custom_wer",
+        "expected": 29.67,
+        "measured": 29.6651,
+        "abs_difference_pp": 0.0049,
+        "within_tolerance": true,
+        "source": "layout_ab_benchmark_results.txt"
+      },
+      {
+        "preprocessing": "adaptive",
+        "psm": 4,
+        "metric": "raw_cer",
+        "expected": 12.3,
+        "measured": 12.3014,
+        "abs_difference_pp": 0.0014,
+        "within_tolerance": true,
+        "source": "layout_ab_benchmark_results.txt"
+      },
+      {
+        "preprocessing": "adaptive",
+        "psm": 4,
+        "metric": "raw_wer",
+        "expected": 29.67,
+        "measured": 29.6651,
+        "abs_difference_pp": 0.0049,
+        "within_tolerance": true,
+        "source": "layout_ab_benchmark_results.txt"
+      },
+      {
+        "preprocessing": "adaptive",
+        "psm": 6,
+        "metric": "custom_cer",
+        "expected": 12.89,
+        "measured": 12.8899,
+        "abs_difference_pp": 0.0001,
+        "within_tolerance": true,
+        "source": "layout_ab_benchmark_results.txt"
+      },
+      {
+        "preprocessing": "adaptive",
+        "psm": 6,
+        "metric": "custom_wer",
+        "expected": 30.62,
+        "measured": 30.622,
+        "abs_difference_pp": 0.002,
+        "within_tolerance": true,
+        "source": "layout_ab_benchmark_results.txt"
+      },
+      {
+        "preprocessing": "adaptive",
+        "psm": 6,
+        "metric": "raw_cer",
+        "expected": 13.3,
+        "measured": 13.3019,
+        "abs_difference_pp": 0.0019,
+        "within_tolerance": true,
+        "source": "layout_ab_benchmark_results.txt"
+      },
+      {
+        "preprocessing": "adaptive",
+        "psm": 6,
+        "metric": "raw_wer",
+        "expected": 30.62,
+        "measured": 30.622,
+        "abs_difference_pp": 0.002,
+        "within_tolerance": true,
+        "source": "layout_ab_benchmark_results.txt"
+      }
+    ]
+  },
+  "results": [
+    {
+      "phase": "baseline",
+      "preprocessing": "original",
+      "psm": 3,
+      "raw_cer": 29.958799293702178,
+      "raw_wer": 40.19138755980861,
+      "custom_cer": 29.958799293702178,
+      "custom_wer": 40.19138755980861,
+      "elapsed_seconds": 3.144,
+      "word_count": 157,
+      "raw_words": 157
+    },
+    {
+      "phase": "baseline",
+      "preprocessing": "original",
+      "psm": 4,
+      "raw_cer": 17.010005885815186,
+      "raw_wer": 27.751196172248804,
+      "custom_cer": 15.77398469688052,
+      "custom_wer": 27.751196172248804,
+      "elapsed_seconds": 3.026,
+      "word_count": 191,
+      "raw_words": 191
+    },
+    {
+      "phase": "baseline",
+      "preprocessing": "original",
+      "psm": 6,
+      "raw_cer": 9.064155385520895,
+      "raw_wer": 21.052631578947366,
+      "custom_cer": 9.711595055915243,
+      "custom_wer": 22.966507177033492,
+      "elapsed_seconds": 7.136,
+      "word_count": 215,
+      "raw_words": 215
+    },
+    {
+      "phase": "baseline",
+      "preprocessing": "contrast",
+      "psm": 3,
+      "raw_cer": 13.007651559741024,
+      "raw_wer": 22.966507177033492,
+      "custom_cer": 13.301942319011184,
+      "custom_wer": 24.401913875598087,
+      "elapsed_seconds": 4.061,
+      "word_count": 198,
+      "raw_words": 198
+    },
+    {
+      "phase": "baseline",
+      "preprocessing": "contrast",
+      "psm": 4,
+      "raw_cer": 17.127722189523247,
+      "raw_wer": 26.31578947368421,
+      "custom_cer": 17.42201294879341,
+      "custom_wer": 27.751196172248804,
+      "elapsed_seconds": 4.142,
+      "word_count": 189,
+      "raw_words": 189
+    },
+    {
+      "phase": "baseline",
+      "preprocessing": "contrast",
+      "psm": 6,
+      "raw_cer": 9.476162448499117,
+      "raw_wer": 22.48803827751196,
+      "custom_cer": 10.829899941141848,
+      "custom_wer": 23.444976076555022,
+      "elapsed_seconds": 3.54,
+      "word_count": 213,
+      "raw_words": 213
+    },
+    {
+      "phase": "baseline",
+      "preprocessing": "grayscale",
+      "psm": 3,
+      "raw_cer": 11.183048852266039,
+      "raw_wer": 22.966507177033492,
+      "custom_cer": 10.476751030017658,
+      "custom_wer": 22.00956937799043,
+      "elapsed_seconds": 3.229,
+      "word_count": 205,
+      "raw_words": 205
+    },
+    {
+      "phase": "baseline",
+      "preprocessing": "grayscale",
+      "psm": 4,
+      "raw_cer": 10.947616244849911,
+      "raw_wer": 23.444976076555022,
+      "custom_cer": 11.653914067098293,
+      "custom_wer": 23.923444976076556,
+      "elapsed_seconds": 3.175,
+      "word_count": 207,
+      "raw_words": 207
+    },
+    {
+      "phase": "baseline",
+      "preprocessing": "grayscale",
+      "psm": 6,
+      "raw_cer": 11.300765155974101,
+      "raw_wer": 24.401913875598087,
+      "custom_cer": 11.24190700412007,
+      "custom_wer": 24.401913875598087,
+      "elapsed_seconds": 2.526,
+      "word_count": 208,
+      "raw_words": 208
+    },
+    {
+      "phase": "baseline",
+      "preprocessing": "threshold",
+      "psm": 3,
+      "raw_cer": 13.596233078281342,
+      "raw_wer": 32.535885167464116,
+      "custom_cer": 13.066509711595057,
+      "custom_wer": 32.057416267942585,
+      "elapsed_seconds": 2.635,
+      "word_count": 197,
+      "raw_words": 197
+    },
+    {
+      "phase": "baseline",
+      "preprocessing": "threshold",
+      "psm": 4,
+      "raw_cer": 13.772807533843437,
+      "raw_wer": 33.49282296650718,
+      "custom_cer": 13.243084167157152,
+      "custom_wer": 33.014354066985646,
+      "elapsed_seconds": 2.808,
+      "word_count": 198,
+      "raw_words": 198
+    },
+    {
+      "phase": "baseline",
+      "preprocessing": "threshold",
+      "psm": 6,
+      "raw_cer": 13.53737492642731,
+      "raw_wer": 32.535885167464116,
+      "custom_cer": 13.243084167157152,
+      "custom_wer": 32.057416267942585,
+      "elapsed_seconds": 4.082,
+      "word_count": 207,
+      "raw_words": 207
+    },
+    {
+      "phase": "baseline",
+      "preprocessing": "adaptive",
+      "psm": 3,
+      "raw_cer": 12.301353737492644,
+      "raw_wer": 29.665071770334926,
+      "custom_cer": 12.007062978222484,
+      "custom_wer": 29.665071770334926,
+      "elapsed_seconds": 3.283,
+      "word_count": 200,
+      "raw_words": 200
+    },
+    {
+      "phase": "baseline",
+      "preprocessing": "adaptive",
+      "psm": 4,
+      "raw_cer": 12.301353737492644,
+      "raw_wer": 29.665071770334926,
+      "custom_cer": 12.007062978222484,
+      "custom_wer": 29.665071770334926,
+      "elapsed_seconds": 3.312,
+      "word_count": 200,
+      "raw_words": 200
+    },
+    {
+      "phase": "baseline",
+      "preprocessing": "adaptive",
+      "psm": 6,
+      "raw_cer": 13.301942319011184,
+      "raw_wer": 30.62200956937799,
+      "custom_cer": 12.889935256032961,
+      "custom_wer": 30.62200956937799,
+      "elapsed_seconds": 2.939,
+      "word_count": 204,
+      "raw_words": 204
+    },
+    {
+      "phase": "experiment",
+      "preprocessing": "upscale2x",
+      "psm": 3,
+      "raw_cer": 26.07416127133608,
+      "raw_wer": 31.100478468899524,
+      "custom_cer": 27.839905826957036,
+      "custom_wer": 33.014354066985646,
+      "elapsed_seconds": 3.369,
+      "word_count": 173,
+      "raw_words": 173
+    },
+    {
+      "phase": "experiment",
+      "preprocessing": "upscale2x",
+      "psm": 4,
+      "raw_cer": 8.004708652148322,
+      "raw_wer": 16.267942583732058,
+      "custom_cer": 8.181283107710417,
+      "custom_wer": 16.74641148325359,
+      "elapsed_seconds": 3.954,
+      "word_count": 211,
+      "raw_words": 211
+    },
+    {
+      "phase": "experiment",
+      "preprocessing": "upscale2x",
+      "psm": 6,
+      "raw_cer": 10.123602118893468,
+      "raw_wer": 22.966507177033492,
+      "custom_cer": 10.829899941141848,
+      "custom_wer": 25.358851674641148,
+      "elapsed_seconds": 4.405,
+      "word_count": 228,
+      "raw_words": 228
+    },
+    {
+      "phase": "experiment",
+      "preprocessing": "grayscale_clahe",
+      "psm": 3,
+      "raw_cer": 16.597998822836963,
+      "raw_wer": 26.794258373205743,
+      "custom_cer": 17.42201294879341,
+      "custom_wer": 25.837320574162682,
+      "elapsed_seconds": 2.324,
+      "word_count": 189,
+      "raw_words": 189
+    },
+    {
+      "phase": "experiment",
+      "preprocessing": "grayscale_clahe",
+      "psm": 4,
+      "raw_cer": 9.358446144791053,
+      "raw_wer": 21.5311004784689,
+      "custom_cer": 12.654502648616834,
+      "custom_wer": 26.31578947368421,
+      "elapsed_seconds": 2.651,
+      "word_count": 208,
+      "raw_words": 208
+    },
+    {
+      "phase": "experiment",
+      "preprocessing": "grayscale_clahe",
+      "psm": 6,
+      "raw_cer": 10.829899941141848,
+      "raw_wer": 22.48803827751196,
+      "custom_cer": 11.006474396703943,
+      "custom_wer": 22.966507177033492,
+      "elapsed_seconds": 2.7,
+      "word_count": 210,
+      "raw_words": 210
+    },
+    {
+      "phase": "experiment",
+      "preprocessing": "otsu",
+      "psm": 3,
+      "raw_cer": 34.0788699234844,
+      "raw_wer": 54.54545454545454,
+      "custom_cer": 34.0788699234844,
+      "custom_wer": 54.54545454545454,
+      "elapsed_seconds": 2.255,
+      "word_count": 157,
+      "raw_words": 157
+    },
+    {
+      "phase": "experiment",
+      "preprocessing": "otsu",
+      "psm": 4,
+      "raw_cer": 22.13066509711595,
+      "raw_wer": 44.97607655502392,
+      "custom_cer": 21.13007651559741,
+      "custom_wer": 44.97607655502392,
+      "elapsed_seconds": 2.714,
+      "word_count": 192,
+      "raw_words": 192
+    },
+    {
+      "phase": "experiment",
+      "preprocessing": "otsu",
+      "psm": 6,
+      "raw_cer": 14.83225426721601,
+      "raw_wer": 40.19138755980861,
+      "custom_cer": 15.420835785756326,
+      "custom_wer": 41.62679425837321,
+      "elapsed_seconds": 2.935,
+      "word_count": 215,
+      "raw_words": 215
+    },
+    {
+      "phase": "experiment",
+      "preprocessing": "denoise_sharpen",
+      "psm": 3,
+      "raw_cer": 72.86639199529135,
+      "raw_wer": 85.64593301435407,
+      "custom_cer": 72.86639199529135,
+      "custom_wer": 85.16746411483254,
+      "elapsed_seconds": 1.527,
+      "word_count": 91,
+      "raw_words": 91
+    },
+    {
+      "phase": "experiment",
+      "preprocessing": "denoise_sharpen",
+      "psm": 4,
+      "raw_cer": 36.25662154208358,
+      "raw_wer": 67.46411483253588,
+      "custom_cer": 32.9605650382578,
+      "custom_wer": 65.07177033492823,
+      "elapsed_seconds": 2.57,
+      "word_count": 195,
+      "raw_words": 195
+    },
+    {
+      "phase": "experiment",
+      "preprocessing": "denoise_sharpen",
+      "psm": 6,
+      "raw_cer": 32.60741612713361,
+      "raw_wer": 67.46411483253588,
+      "custom_cer": 33.96115361977634,
+      "custom_wer": 68.89952153110048,
+      "elapsed_seconds": 2.674,
+      "word_count": 199,
+      "raw_words": 199
+    }
+  ],
+  "notes": {
+    "raw": "Tesseract TSV grouping and word order.",
+    "custom": "reconstruct_reading_order() output.",
+    "cer_wer": "evaluate_ocr.calculate_cer/calculate_wer, expressed as percentages.",
+    "memory": "Peak memory not measured."
+  }
+}

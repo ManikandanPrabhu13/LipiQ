@@ -713,3 +713,31 @@
     margin: 0;
   }
 }
+
+
+.occurrence-navigation {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  margin: 12px 0;
+}
+
+.occurrence-navigation button {
+  padding: 8px 12px;
+  border: 1px solid #d8c7ff;
+  border-radius: 8px;
+  background: #f5f0ff;
+  color: #6633bb;
+  cursor: pointer;
+}
+
+.occurrence-navigation button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.occurrence-navigation span {
+  font-size: 14px;
+  font-weight: 600;
+}

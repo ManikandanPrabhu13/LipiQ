@@ -26,12 +26,12 @@ def normalize(text):
 # EVIDENCE MATCHING
 # --------------------------------------------------
 
-def find_evidence(quote, words):
+def find_all_evidence(quote, words):
     """
-    Find an exact sequence of consecutive OCR words on
-    the same line.
+    Find every exact sequence of consecutive OCR words
+    on the same line.
 
-    Returns:
+    Returns a list of occurrences. Each occurrence contains:
         - matched text
         - individual word boxes and confidence scores
         - combined highlight rectangle
@@ -40,9 +40,9 @@ def find_evidence(quote, words):
     target = [token for token in target if token]
 
     if not target:
-        return None
+        return []
 
-    # Group OCR words by line, preserving their input order.
+    # Group OCR words by line, preserving input order.
     lines = {}
 
     for word in words:
@@ -65,7 +65,9 @@ def find_evidence(quote, words):
 
         lines.setdefault(line_key, []).append(word)
 
-    # Search for consecutive words within each line.
+    occurrences = []
+
+    # Search every line for every matching occurrence.
     for line_words in lines.values():
         normalized_words = [
             normalize(word["text"]) for word in line_words
@@ -83,7 +85,7 @@ def find_evidence(quote, words):
                 start:start + len(target)
             ]
 
-            # Preserve individual boxes and OCR confidence.
+            # Preserve individual word boxes and confidence.
             boxes = []
 
             for word in matched:
@@ -98,7 +100,7 @@ def find_evidence(quote, words):
                     "height": original_box["height"],
                 })
 
-            # Calculate one rectangle covering all matched words.
+            # Calculate a rectangle covering all matched words.
             left = min(box["x"] for box in boxes)
             top = min(box["y"] for box in boxes)
 
@@ -112,7 +114,7 @@ def find_evidence(quote, words):
                 for box in boxes
             )
 
-            return {
+            occurrences.append({
                 "matched_text": " ".join(
                     word["text"] for word in matched
                 ),
@@ -123,9 +125,24 @@ def find_evidence(quote, words):
                     "width": right - left,
                     "height": bottom - top,
                 },
-            }
+            })
 
-    return None
+    return occurrences
+
+
+def find_evidence(quote, words):
+    """
+    Backward-compatible function.
+
+    Returns the first occurrence, or None if no match exists.
+    Existing code that uses find_evidence() will continue working.
+    """
+    occurrences = find_all_evidence(quote, words)
+
+    if not occurrences:
+        return None
+
+    return occurrences[0]
 
 
 # --------------------------------------------------
@@ -148,9 +165,10 @@ def main():
 
     words = data.get("words", [])
 
-    quote = "ಅತೀ ಜರೂರು ಪತ್ರ"
+    # Replace this with a quote copied from your OCR output.
+    quote = "à²…à²¤à³€ à²œà²°à³‚à²°à³ à²ªà²¤à²°"
 
-    result = find_evidence(quote, words)
+    occurrences = find_all_evidence(quote, words)
 
     print("=" * 50)
     print("LIPIQ - EVIDENCE MATCH TEST")
@@ -164,8 +182,9 @@ def main():
         data.get("image_height"),
     )
     print("Search quote:", quote)
+    print("Occurrences found:", len(occurrences))
 
-    if result is None:
+    if not occurrences:
         print("\nNO MATCH FOUND")
         print(
             "Check the OCR spelling or try a shorter "
@@ -173,14 +192,15 @@ def main():
         )
         return
 
-    # Include image dimensions for frontend positioning.
-    result["image_size"] = {
-        "width": data.get("image_width"),
-        "height": data.get("image_height"),
-    }
+    # Include image dimensions in every occurrence.
+    for index, occurrence in enumerate(occurrences, start=1):
+        occurrence["image_size"] = {
+            "width": data.get("image_width"),
+            "height": data.get("image_height"),
+        }
 
-    print("\nMATCH FOUND!")
-    print(json.dumps(result, ensure_ascii=False, indent=2))
+        print(f"\nMATCH {index} OF {len(occurrences)}")
+        print(json.dumps(occurrence, ensure_ascii=False, indent=2))
 
 
 if __name__ == "__main__":

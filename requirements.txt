@@ -1,0 +1,32 @@
+# LipiQ — Python backend dependencies
+#
+# Install:  pip install -r requirements.txt
+#
+# Notes:
+#   - Tesseract OCR must be installed separately on the host OS.
+#     Windows: https://github.com/UB-Mannheim/tesseract/wiki
+#     The Kannada language pack (kan.traineddata) is required.
+#   - opencv-python provides image preprocessing (adaptive thresholding).
+#   - python-dotenv is optional; AI keys can also be set as shell env variables.
+
+# Web framework
+fastapi==0.141.1
+uvicorn==0.52.0
+python-multipart==0.0.32   # required by FastAPI for file uploads
+
+# OCR
+pytesseract==0.3.13
+Pillow==12.2.0
+
+# Image preprocessing (used by ocr_engine.py)
+opencv-python==5.0.0.93
+numpy==2.4.6
+
+# AI provider HTTP calls (Groq / OpenRouter / Ollama)
+requests==2.31.0
+
+# Configuration
+python-dotenv==1.2.4
+
+# Data validation
+pydantic==2.13.4

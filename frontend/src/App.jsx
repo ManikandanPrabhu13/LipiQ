@@ -39,7 +39,13 @@ function App() {
   const [summaryLoading, setSummaryLoading] = useState(false);
   const [question, setQuestion] = useState("");
   const [answer, setAnswer] = useState("");
+  const [isSupported, setIsSupported] = useState(null);
+  const [passages, setPassages] = useState([]);
+  const [supportingEvidence, setSupportingEvidence] = useState([]);
+  const [activePassageIndex, setActivePassageIndex] = useState(null);
   const [answerLoading, setAnswerLoading] = useState(false);
+  const [insights, setInsights] = useState(null);
+  const [insightsLoading, setInsightsLoading] = useState(false);
   const [aiConfigured, setAiConfigured] = useState(false);
   const [aiStatusChecked, setAiStatusChecked] = useState(false);
 
@@ -86,6 +92,11 @@ function App() {
     setSummary("");
     setQuestion("");
     setAnswer("");
+    setIsSupported(null);
+    setPassages([]);
+    setSupportingEvidence([]);
+    setActivePassageIndex(null);
+    setInsights(null);
   }
 
   function handleFileChange(event) {
@@ -286,6 +297,43 @@ function App() {
     }
   }
 
+  async function generateInsights() {
+    if (!editedText.trim()) {
+      setError("Extract or enter some text before generating insights.");
+      return;
+    }
+
+    setInsightsLoading(true);
+    setInsights(null);
+    setError("");
+
+    try {
+      const response = await fetch(`${API_BASE}/api/insights`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          text: editedText,
+          words: result?.words || [],
+          image_width: result?.image_width || 1,
+          image_height: result?.image_height || 1,
+        }),
+      });
+
+      const data = await readResponse(
+        response,
+        "Unable to extract document insights."
+      );
+
+      setInsights(data);
+    } catch (err) {
+      setError(`Insights failed: ${err.message}`);
+    } finally {
+      setInsightsLoading(false);
+    }
+  }
+
   async function askQuestion(event) {
     event?.preventDefault();
 
@@ -301,6 +349,10 @@ function App() {
 
     setAnswerLoading(true);
     setAnswer("");
+    setIsSupported(null);
+    setPassages([]);
+    setSupportingEvidence([]);
+    setActivePassageIndex(null);
     setError("");
 
     try {
@@ -312,6 +364,9 @@ function App() {
         body: JSON.stringify({
           text: editedText,
           question: question.trim(),
+          words: result?.words || [],
+          image_width: result?.image_width || 1,
+          image_height: result?.image_height || 1,
         }),
       });
 
@@ -321,11 +376,60 @@ function App() {
       );
 
       setAnswer(data.answer || "No answer was returned.");
+      setIsSupported(typeof data.is_supported === "boolean" ? data.is_supported : true);
+      setPassages(Array.isArray(data.passages) ? data.passages : []);
+      const evidenceList = Array.isArray(data.supporting_evidence) ? data.supporting_evidence : [];
+      setSupportingEvidence(evidenceList);
+
+      // If the answer returned evidence, optionally auto-select the first found evidence
+      const firstFoundIndex = evidenceList.findIndex(e => e.found && e.occurrences?.length > 0);
+      if (firstFoundIndex >= 0) {
+        highlightPassageEvidence(evidenceList[firstFoundIndex], firstFoundIndex);
+      }
     } catch (err) {
       setError(`Question failed: ${err.message}`);
     } finally {
       setAnswerLoading(false);
     }
+  }
+
+  function highlightPassageEvidence(item, index) {
+    if (!item) return;
+    setActivePassageIndex(index);
+    if (item.found && item.occurrences?.length > 0) {
+      setSelectedWord({ text: item.passage });
+      setEvidence({
+        found: true,
+        quote: item.passage,
+        matched_text: item.occurrences[0].matched_text,
+        occurrence_count: item.occurrences.length,
+        occurrences: item.occurrences,
+        highlight_box: item.highlight_box || item.occurrences[0].highlight_box,
+        image_size: {
+          width: result?.image_width,
+          height: result?.image_height,
+        },
+      });
+      setOccurrenceIndex(0);
+    }
+  }
+
+  function highlightEvidenceObject(evidenceObj, labelText) {
+    if (!evidenceObj || !evidenceObj.found || !evidenceObj.occurrences?.length) return;
+    setSelectedWord({ text: labelText || evidenceObj.occurrences[0]?.matched_text });
+    setEvidence({
+      found: true,
+      quote: labelText || evidenceObj.occurrences[0]?.matched_text,
+      matched_text: evidenceObj.occurrences[0].matched_text,
+      occurrence_count: evidenceObj.occurrences.length,
+      occurrences: evidenceObj.occurrences,
+      highlight_box: evidenceObj.highlight_box || evidenceObj.occurrences[0].highlight_box,
+      image_size: {
+        width: result?.image_width,
+        height: result?.image_height,
+      },
+    });
+    setOccurrenceIndex(0);
   }
 
   const occurrences = evidence?.found
@@ -727,10 +831,232 @@ function App() {
                 )}
               </section>
 
-              {/* Grounded document Q&A */}
+              {/* Document Insights */}
               <section className="result-panel" style={featurePanelStyle}>
                 <div className="panel-heading">
                   <span>05</span>
+                  <h3>Document insights</h3>
+                </div>
+
+                <p className="click-hint">
+                  Automatically extract structured metadata, key points, action items,
+                  and deadlines strictly grounded in the document text.
+                </p>
+
+                {!aiStatusChecked ? (
+                  <p role="status">Checking AI availability...</p>
+                ) : !aiConfigured ? (
+                  <p role="status">
+                    AI features are not configured. Set up a supported AI
+                    provider in the backend to enable Document Insights.
+                  </p>
+                ) : (
+                  <button
+                    type="button"
+                    className="primary-button"
+                    onClick={generateInsights}
+                    disabled={insightsLoading || !editedText.trim()}
+                  >
+                    {insightsLoading ? "Extracting insights..." : "Extract document insights"}
+                  </button>
+                )}
+
+                {insightsLoading && (
+                  <p role="status">Analyzing document and validating facts...</p>
+                )}
+
+                {insights && (
+                  <div className="evidence-info" style={{ ...outputStyle, gap: "16px" }}>
+                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", width: "100%", borderBottom: "1px solid #e5defb", paddingBottom: "10px" }}>
+                      <strong>Structured Summary</strong>
+                      <span className="status-pill" style={{ fontSize: "11px", color: "#1e7e4e", background: "#edfbf3", borderColor: "#c3eeda" }}>
+                        ✓ Grounded in Document
+                      </span>
+                    </div>
+
+                    {/* Metadata Grid */}
+                    <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: "12px", width: "100%" }}>
+                      {/* Subject */}
+                      <div style={{ padding: "10px", background: "#fff", border: "1px solid #e6e2f5", borderRadius: "8px" }}>
+                        <div style={{ fontSize: "10px", fontWeight: "700", color: "#6b56c7", textTransform: "uppercase" }}>Subject / Topic</div>
+                        <div lang="kn" style={{ fontSize: "13px", fontWeight: "600", color: "#252238", marginTop: "4px" }}>
+                          {insights.subject || <span style={{ color: "#8a8799", fontWeight: "normal" }}>Not found in document</span>}
+                        </div>
+                        {insights.field_evidence?.subject?.evidence?.found && (
+                          <button
+                            type="button"
+                            onClick={() => highlightEvidenceObject(insights.field_evidence.subject.evidence, insights.subject)}
+                            style={{ marginTop: "6px", fontSize: "10px", color: "#725cde", background: "none", border: "none", padding: 0, cursor: "pointer", textDecoration: "underline" }}
+                          >
+                            📍 View on document
+                          </button>
+                        )}
+                      </div>
+
+                      {/* Date */}
+                      <div style={{ padding: "10px", background: "#fff", border: "1px solid #e6e2f5", borderRadius: "8px" }}>
+                        <div style={{ fontSize: "10px", fontWeight: "700", color: "#6b56c7", textTransform: "uppercase" }}>Date</div>
+                        <div lang="kn" style={{ fontSize: "13px", fontWeight: "600", color: "#252238", marginTop: "4px" }}>
+                          {insights.date || <span style={{ color: "#8a8799", fontWeight: "normal" }}>Not found in document</span>}
+                        </div>
+                        {insights.field_evidence?.date?.evidence?.found && (
+                          <button
+                            type="button"
+                            onClick={() => highlightEvidenceObject(insights.field_evidence.date.evidence, insights.date)}
+                            style={{ marginTop: "6px", fontSize: "10px", color: "#725cde", background: "none", border: "none", padding: 0, cursor: "pointer", textDecoration: "underline" }}
+                          >
+                            📍 View on document
+                          </button>
+                        )}
+                      </div>
+
+                      {/* Issuer */}
+                      <div style={{ padding: "10px", background: "#fff", border: "1px solid #e6e2f5", borderRadius: "8px" }}>
+                        <div style={{ fontSize: "10px", fontWeight: "700", color: "#6b56c7", textTransform: "uppercase" }}>Issuer / Authority</div>
+                        <div lang="kn" style={{ fontSize: "13px", fontWeight: "600", color: "#252238", marginTop: "4px" }}>
+                          {insights.issuer || <span style={{ color: "#8a8799", fontWeight: "normal" }}>Not found in document</span>}
+                        </div>
+                        {insights.field_evidence?.issuer?.evidence?.found && (
+                          <button
+                            type="button"
+                            onClick={() => highlightEvidenceObject(insights.field_evidence.issuer.evidence, insights.issuer)}
+                            style={{ marginTop: "6px", fontSize: "10px", color: "#725cde", background: "none", border: "none", padding: 0, cursor: "pointer", textDecoration: "underline" }}
+                          >
+                            📍 View on document
+                          </button>
+                        )}
+                      </div>
+
+                      {/* Recipient */}
+                      <div style={{ padding: "10px", background: "#fff", border: "1px solid #e6e2f5", borderRadius: "8px" }}>
+                        <div style={{ fontSize: "10px", fontWeight: "700", color: "#6b56c7", textTransform: "uppercase" }}>Recipient / Target</div>
+                        <div lang="kn" style={{ fontSize: "13px", fontWeight: "600", color: "#252238", marginTop: "4px" }}>
+                          {insights.recipient || <span style={{ color: "#8a8799", fontWeight: "normal" }}>Not found in document</span>}
+                        </div>
+                        {insights.field_evidence?.recipient?.evidence?.found && (
+                          <button
+                            type="button"
+                            onClick={() => highlightEvidenceObject(insights.field_evidence.recipient.evidence, insights.recipient)}
+                            style={{ marginTop: "6px", fontSize: "10px", color: "#725cde", background: "none", border: "none", padding: 0, cursor: "pointer", textDecoration: "underline" }}
+                          >
+                            📍 View on document
+                          </button>
+                        )}
+                      </div>
+
+                      {/* Deadline */}
+                      <div style={{ padding: "10px", background: insights.deadline ? "#fff9f2" : "#fff", border: insights.deadline ? "1px solid #fbd9b3" : "1px solid #e6e2f5", borderRadius: "8px" }}>
+                        <div style={{ fontSize: "10px", fontWeight: "700", color: insights.deadline ? "#b85406" : "#6b56c7", textTransform: "uppercase" }}>Deadline / Last Date</div>
+                        <div lang="kn" style={{ fontSize: "13px", fontWeight: "600", color: insights.deadline ? "#b85406" : "#252238", marginTop: "4px" }}>
+                          {insights.deadline || <span style={{ color: "#8a8799", fontWeight: "normal" }}>Not found in document</span>}
+                        </div>
+                        {insights.field_evidence?.deadline?.evidence?.found && (
+                          <button
+                            type="button"
+                            onClick={() => highlightEvidenceObject(insights.field_evidence.deadline.evidence, insights.deadline)}
+                            style={{ marginTop: "6px", fontSize: "10px", color: "#b85406", background: "none", border: "none", padding: 0, cursor: "pointer", textDecoration: "underline" }}
+                          >
+                            📍 View on document
+                          </button>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Section Headings */}
+                    {insights.section_headings?.length > 0 && (
+                      <div style={{ width: "100%", marginTop: "4px" }}>
+                        <div style={{ fontSize: "11px", fontWeight: "700", color: "#554b8c", marginBottom: "6px" }}>
+                          Section Headings
+                        </div>
+                        <div style={{ display: "flex", flexWrap: "wrap", gap: "6px" }}>
+                          {insights.section_headings.map((h, i) => (
+                            <span key={i} lang="kn" style={{ fontSize: "11px", background: "#f0edff", color: "#5945c5", padding: "3px 8px", borderRadius: "4px" }}>
+                              {h}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Key Points */}
+                    <div style={{ width: "100%", marginTop: "6px" }}>
+                      <div style={{ fontSize: "11px", fontWeight: "700", color: "#554b8c", marginBottom: "8px" }}>
+                        Key Points ({insights.key_points?.length || 0})
+                      </div>
+                      {(!insights.key_points || insights.key_points.length === 0) ? (
+                        <p style={{ fontSize: "12px", color: "#8a8799", margin: 0 }}>No key points identified in document.</p>
+                      ) : (
+                        <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+                          {insights.key_points.map((kp, idx) => (
+                            <div key={idx} style={{ padding: "8px 10px", background: "#fff", border: "1px solid #e6e2f5", borderRadius: "6px" }}>
+                              <div lang="kn" style={{ fontSize: "12px", color: "#252238", lineHeight: "1.5" }}>
+                                • {kp.text}
+                              </div>
+                              {kp.source_passage && (
+                                <div style={{ marginTop: "4px", display: "flex", alignItems: "center", justifyContent: "space-between", gap: "6px" }}>
+                                  <span lang="kn" style={{ fontSize: "11px", color: "#67667a", fontStyle: "italic" }}>
+                                    "{kp.source_passage}"
+                                  </span>
+                                  {kp.evidence?.found && (
+                                    <button
+                                      type="button"
+                                      onClick={() => highlightEvidenceObject(kp.evidence, kp.source_passage)}
+                                      style={{ fontSize: "10px", color: "#725cde", background: "none", border: "none", cursor: "pointer", whiteSpace: "nowrap", textDecoration: "underline" }}
+                                    >
+                                      📍 Locate
+                                    </button>
+                                  )}
+                                </div>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Action Items */}
+                    <div style={{ width: "100%", marginTop: "6px" }}>
+                      <div style={{ fontSize: "11px", fontWeight: "700", color: "#554b8c", marginBottom: "8px" }}>
+                        Required Actions ({insights.action_items?.length || 0})
+                      </div>
+                      {(!insights.action_items || insights.action_items.length === 0) ? (
+                        <p style={{ fontSize: "12px", color: "#8a8799", margin: 0 }}>No explicit action items required by this document.</p>
+                      ) : (
+                        <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+                          {insights.action_items.map((ai, idx) => (
+                            <div key={idx} style={{ padding: "8px 10px", background: "#fff", border: "1px solid #e6e2f5", borderRadius: "6px" }}>
+                              <div lang="kn" style={{ fontSize: "12px", color: "#252238", lineHeight: "1.5", fontWeight: "600" }}>
+                                ✓ {ai.text}
+                              </div>
+                              {ai.source_passage && (
+                                <div style={{ marginTop: "4px", display: "flex", alignItems: "center", justifyContent: "space-between", gap: "6px" }}>
+                                  <span lang="kn" style={{ fontSize: "11px", color: "#67667a", fontStyle: "italic" }}>
+                                    "{ai.source_passage}"
+                                  </span>
+                                  {ai.evidence?.found && (
+                                    <button
+                                      type="button"
+                                      onClick={() => highlightEvidenceObject(ai.evidence, ai.source_passage)}
+                                      style={{ fontSize: "10px", color: "#725cde", background: "none", border: "none", cursor: "pointer", whiteSpace: "nowrap", textDecoration: "underline" }}
+                                    >
+                                      📍 Locate
+                                    </button>
+                                  )}
+                                </div>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
+              </section>
+
+              {/* Grounded document Q&A */}
+              <section className="result-panel" style={featurePanelStyle}>
+                <div className="panel-heading">
+                  <span>06</span>
                   <h3>Ask your document</h3>
                 </div>
 
@@ -778,10 +1104,93 @@ function App() {
 
                 {answer && (
                   <div className="evidence-info" style={outputStyle}>
-                    <strong>Answer</strong>
+                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", width: "100%", gap: "10px", flexWrap: "wrap" }}>
+                      <strong>Answer</strong>
+                      {isSupported !== null && (
+                        <span
+                          className="status-pill"
+                          style={{
+                            fontSize: "11px",
+                            padding: "4px 10px",
+                            color: isSupported ? "#1e7e4e" : "#b03a3a",
+                            background: isSupported ? "#edfbf3" : "#fdf2f2",
+                            borderColor: isSupported ? "#c3eeda" : "#f7cfcf",
+                          }}
+                        >
+                          {isSupported ? "✓ Document Supported" : "⚠ Not Directly Supported"}
+                        </span>
+                      )}
+                    </div>
                     <p lang="kn" style={paragraphStyle}>
                       {answer}
                     </p>
+
+                    {/* Supporting source passages */}
+                    {supportingEvidence.length > 0 && (
+                      <div style={{ marginTop: "14px", width: "100%", borderTop: "1px solid #e5defb", paddingTop: "12px" }}>
+                        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "8px" }}>
+                          <span style={{ fontSize: "11px", fontWeight: "700", color: "#6b56c7", textTransform: "uppercase", letterSpacing: "0.8px" }}>
+                            Supporting Source Passages ({supportingEvidence.length})
+                          </span>
+                          <span style={{ fontSize: "10px", color: "#8a8799" }}>
+                            Click a passage to highlight in image
+                          </span>
+                        </div>
+                        <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+                          {supportingEvidence.map((item, idx) => {
+                            const isSelected = activePassageIndex === idx;
+                            return (
+                              <div
+                                key={idx}
+                                onClick={() => highlightPassageEvidence(item, idx)}
+                                style={{
+                                  padding: "10px 12px",
+                                  borderRadius: "8px",
+                                  border: isSelected
+                                    ? "1.5px solid #725cde"
+                                    : "1px solid #e6e2f5",
+                                  background: isSelected ? "#f4f0ff" : "#ffffff",
+                                  cursor: item.found ? "pointer" : "default",
+                                  transition: "all 0.15s ease",
+                                }}
+                                title={item.found ? "Click to view highlight on document" : "Exact image coordinates not found for this quote"}
+                              >
+                                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "8px", marginBottom: "4px" }}>
+                                  <span style={{ fontSize: "10px", fontWeight: "700", color: "#554b8c" }}>
+                                    Passage #{idx + 1}
+                                  </span>
+                                  <span
+                                    style={{
+                                      fontSize: "10px",
+                                      fontWeight: "600",
+                                      color: item.found ? "#25825b" : "#8b8999",
+                                    }}
+                                  >
+                                    {item.found
+                                      ? `📍 Highlighted in image (${item.occurrence_count} match${item.occurrence_count > 1 ? "es" : ""})`
+                                      : "📄 Text excerpt"}
+                                  </span>
+                                </div>
+                                <blockquote
+                                  lang="kn"
+                                  style={{
+                                    margin: 0,
+                                    fontSize: "13px",
+                                    lineHeight: "1.6",
+                                    color: "#252238",
+                                    fontStyle: "normal",
+                                    borderLeft: isSelected ? "3px solid #725cde" : "3px solid #cfc7f5",
+                                    paddingLeft: "8px",
+                                  }}
+                                >
+                                  "{item.passage}"
+                                </blockquote>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    )}
                   </div>
                 )}
               </section>

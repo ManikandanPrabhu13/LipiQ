@@ -67,7 +67,7 @@ def find_all_evidence(quote, words):
 
     occurrences = []
 
-    # Search every line for every matching occurrence.
+    # First search line-by-line for occurrences on a single line.
     for line_words in lines.values():
         normalized_words = [
             normalize(word["text"]) for word in line_words
@@ -126,6 +126,46 @@ def find_all_evidence(quote, words):
                     "height": bottom - top,
                 },
             })
+
+    # If no single-line occurrence was found and the target has multiple tokens,
+    # search across line boundaries in reading order.
+    if not occurrences and len(target) > 1:
+        valid_words = [
+            w for w in words
+            if w.get("text", "").strip() and all(k in w.get("box", {}) for k in ("x", "y", "width", "height"))
+        ]
+        norm_valid = [normalize(w["text"]) for w in valid_words]
+
+        for start in range(len(valid_words) - len(target) + 1):
+            if norm_valid[start:start + len(target)] == target:
+                matched = valid_words[start:start + len(target)]
+                boxes = []
+                for word in matched:
+                    original_box = word["box"]
+                    boxes.append({
+                        "text": word["text"],
+                        "confidence": word.get("confidence", -1),
+                        "x": original_box["x"],
+                        "y": original_box["y"],
+                        "width": original_box["width"],
+                        "height": original_box["height"],
+                    })
+
+                left = min(box["x"] for box in boxes)
+                top = min(box["y"] for box in boxes)
+                right = max(box["x"] + box["width"] for box in boxes)
+                bottom = max(box["y"] + box["height"] for box in boxes)
+
+                occurrences.append({
+                    "matched_text": " ".join(word["text"] for word in matched),
+                    "boxes": boxes,
+                    "highlight_box": {
+                        "x": left,
+                        "y": top,
+                        "width": right - left,
+                        "height": bottom - top,
+                    },
+                })
 
     return occurrences
 

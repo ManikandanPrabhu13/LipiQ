@@ -1,4 +1,6 @@
 from io import BytesIO
+import json
+import re
 from pathlib import Path
 
 import pytesseract
@@ -14,7 +16,7 @@ from ai_service import (
     generate as generate_ai,
     get_provider,
 )
-from evidence_match import find_evidence, find_all_evidence
+from evidence_match import find_evidence, find_all_evidence, normalize
 
 
 # --------------------------------------------------
@@ -63,8 +65,17 @@ class DocumentTextRequest(BaseModel):
     text: str = Field(min_length=1, max_length=60000)
 
 
+class InsightsRequest(DocumentTextRequest):
+    words: list[dict] = Field(default_factory=list)
+    image_width: int | None = Field(default=None, gt=0)
+    image_height: int | None = Field(default=None, gt=0)
+
+
 class AskRequest(DocumentTextRequest):
     question: str = Field(min_length=1, max_length=1000)
+    words: list[dict] = Field(default_factory=list)
+    image_width: int | None = Field(default=None, gt=0)
+    image_height: int | None = Field(default=None, gt=0)
 
 
 AI_SYSTEM_PROMPT = (
@@ -349,20 +360,297 @@ def summarize_document(request: DocumentTextRequest):
 
 @app.post("/api/ask")
 def ask_document(request: AskRequest):
-    """Answer a question using only the supplied extracted text."""
-    prompt = (
+    """Answer a question using only the supplied extracted text with evidence passages."""
+    user_prompt = (
+        "Respond ONLY with a valid JSON object matching this schema:\n"
+        "{\n"
+        '  "answer": "Clear, direct answer in the language of the question",\n'
+        '  "is_supported": true,\n'
+        '  "passages": ["exact verbatim quote copied from the document"]\n'
+        "}\n\n"
+        "Rules:\n"
+        "1. Base your answer strictly and exclusively on the DOCUMENT text.\n"
+        "2. Do not invent, extrapolate, or guess names, numbers, dates, or facts.\n"
+        "3. Every item in 'passages' must be an exact verbatim substring from the document that directly justifies the answer.\n"
+        "4. If the document does not contain enough information to answer the question:\n"
+        '   - Set "is_supported" to false.\n'
+        '   - Set "answer" to clearly state that the information cannot be determined from the available document.\n'
+        '   - Provide an empty list for "passages": [].\n'
+        "5. Respond with raw JSON only (no markdown code blocks, no preamble, no postscript).\n\n"
         f"QUESTION: {request.question}\n\n"
         "DOCUMENT:\n<<<\n"
-        f"{request.text}\n>>>\n\n"
-        "Answer in the language of the question, using only the "
-        "document. Quote the relevant Kannada phrase when possible. "
-        "If the document does not contain the answer, say so."
+        f"{request.text}\n>>>"
     )
 
-    result = _run_ai(prompt, max_tokens=600)
+    result = _run_ai(user_prompt, max_tokens=600)
+    raw_answer = result["answer"].strip()
+
+    # Attempt to parse JSON response
+    answer_text = raw_answer
+    is_supported = True
+    passages: list[str] = []
+
+    # Strip markdown block wrappers if present
+    cleaned = raw_answer
+    if cleaned.startswith("```json"):
+        cleaned = cleaned[7:]
+    elif cleaned.startswith("```"):
+        cleaned = cleaned[3:]
+    if cleaned.endswith("```"):
+        cleaned = cleaned[:-3]
+    cleaned = cleaned.strip()
+
+    try:
+        parsed = json.loads(cleaned)
+        if isinstance(parsed, dict):
+            if "answer" in parsed and isinstance(parsed["answer"], str):
+                answer_text = parsed["answer"].strip()
+            if "is_supported" in parsed:
+                is_supported = bool(parsed["is_supported"])
+            if "passages" in parsed and isinstance(parsed["passages"], list):
+                # Filter to non-empty string passages that actually appear in the document
+                for p in parsed["passages"]:
+                    if isinstance(p, str) and p.strip():
+                        passages.append(p.strip())
+    except (json.JSONDecodeError, ValueError):
+        # Fallback to plain text answer if model returned unstructured text
+        answer_text = raw_answer
+        is_supported = not (
+            "cannot be determined" in raw_answer.lower()
+            or "not present" in raw_answer.lower()
+            or "does not contain" in raw_answer.lower()
+        )
+        passages = []
+
+    # Evidence matching: if words are provided, match passages against word coordinates
+    supporting_evidence = []
+    if request.words and passages:
+        for passage in passages:
+            evidence_matches = find_all_evidence(passage, request.words)
+            supporting_evidence.append({
+                "passage": passage,
+                "found": len(evidence_matches) > 0,
+                "occurrence_count": len(evidence_matches),
+                "occurrences": evidence_matches,
+                "highlight_box": evidence_matches[0]["highlight_box"] if evidence_matches else None,
+            })
+    else:
+        for passage in passages:
+            supporting_evidence.append({
+                "passage": passage,
+                "found": False,
+                "occurrence_count": 0,
+                "occurrences": [],
+                "highlight_box": None,
+            })
 
     return {
-        "answer": result["answer"],
+        "answer": answer_text,
+        "is_supported": is_supported,
+        "passages": passages,
+        "supporting_evidence": supporting_evidence,
+        "provider": result["provider"],
+        "model": result["model"],
+    }
+
+
+def _validate_passage(passage: str | None, doc_text: str, norm_doc_text: str) -> str | None:
+    """Ensure passage is a non-empty string that actually appears in the document."""
+    if not isinstance(passage, str) or not passage.strip():
+        return None
+    cleaned = passage.strip()
+    if cleaned in doc_text:
+        return cleaned
+    norm_pass = normalize(cleaned)
+    if norm_pass and norm_pass in norm_doc_text:
+        return cleaned
+    return None
+
+
+def _build_evidence_item(passage: str | None, words: list[dict]) -> dict:
+    """Build standardized evidence dictionary for a verified source passage."""
+    if not passage or not words:
+        return {
+            "found": False,
+            "occurrence_count": 0,
+            "occurrences": [],
+            "highlight_box": None,
+        }
+    matches = find_all_evidence(passage, words)
+    return {
+        "found": len(matches) > 0,
+        "occurrence_count": len(matches),
+        "occurrences": matches,
+        "highlight_box": matches[0]["highlight_box"] if matches else None,
+    }
+
+
+@app.post("/api/insights")
+def extract_insights(request: InsightsRequest):
+    """Automatically extract structured, evidence-backed insights from the document."""
+    user_prompt = (
+        "Analyze the following document and extract structured key information.\n"
+        "Respond ONLY with a valid JSON object matching this EXACT schema:\n"
+        "{\n"
+        '  "subject": "Main subject or topic of document, or null if absent",\n'
+        '  "subject_source": "Verbatim quote from document for subject, or null",\n'
+        '  "date": "Document issuance/reference date, or null if absent",\n'
+        '  "date_source": "Verbatim quote from document for date, or null",\n'
+        '  "issuer": "Issuing authority/department/official, or null if absent",\n'
+        '  "issuer_source": "Verbatim quote from document for issuer, or null",\n'
+        '  "recipient": "Target recipient/organization/public, or null if absent",\n'
+        '  "recipient_source": "Verbatim quote from document for recipient, or null",\n'
+        '  "deadline": "Explicit deadline/last date mentioned, or null if absent",\n'
+        '  "deadline_source": "Verbatim quote from document for deadline, or null",\n'
+        '  "section_headings": ["Heading 1", "Heading 2"],\n'
+        '  "key_points": [\n'
+        '    {"text": "Key statement or fact", "source_passage": "Verbatim quote from document"}\n'
+        "  ],\n"
+        '  "action_items": [\n'
+        '    {"text": "Specific required action or instruction", "source_passage": "Verbatim quote from document"}\n'
+        "  ]\n"
+        "}\n\n"
+        "STRICT GROUNDING RULES:\n"
+        "1. Base ALL extractions exclusively and verbatim on the DOCUMENT text.\n"
+        "2. NEVER invent names, numbers, dates, deadlines, or facts.\n"
+        "3. If a field is not explicitly present in the document, set its value to null (or [] for lists).\n"
+        "4. Do NOT convert an announcement or informational statement into an action_item unless the document actually requests, commands, or requires an action from the reader or department.\n"
+        "5. Every source quote/passage MUST be copied verbatim from the document text.\n"
+        "6. Preserve original Kannada wording where applicable. Do not translate source excerpts.\n"
+        "7. Respond with raw JSON only (no markdown, no preamble, no code fences).\n\n"
+        "DOCUMENT:\n<<<\n"
+        f"{request.text}\n>>>"
+    )
+
+    result = _run_ai(user_prompt, max_tokens=1000)
+    raw_answer = result["answer"].strip()
+
+    # Clean markdown block wrappers if present
+    cleaned = raw_answer
+    if cleaned.startswith("```json"):
+        cleaned = cleaned[7:]
+    elif cleaned.startswith("```"):
+        cleaned = cleaned[3:]
+    if cleaned.endswith("```"):
+        cleaned = cleaned[:-3]
+    cleaned = cleaned.strip()
+
+    try:
+        parsed = json.loads(cleaned)
+        if not isinstance(parsed, dict):
+            parsed = {}
+    except (json.JSONDecodeError, ValueError):
+        parsed = {}
+
+    doc_text = request.text
+    norm_doc = normalize(doc_text)
+    words = request.words or []
+
+    # Helper for scalar fields
+    def process_scalar(field_name: str, source_field: str):
+        val = parsed.get(field_name)
+        val_str = str(val).strip() if isinstance(val, str) and val.strip() else None
+        # Reject literal 'null' strings or placeholders
+        if val_str and val_str.lower() in ("null", "none", "n/a", "not specified", "not found"):
+            val_str = None
+
+        raw_source = parsed.get(source_field)
+        valid_passage = _validate_passage(raw_source, doc_text, norm_doc)
+
+        # If source passage was omitted or invalid, check if the value itself is verbatim in the document
+        if not valid_passage and val_str:
+            valid_passage = _validate_passage(val_str, doc_text, norm_doc)
+
+        evidence = _build_evidence_item(valid_passage, words) if valid_passage else None
+
+        return val_str, valid_passage, evidence
+
+    subject, subject_passage, subject_evidence = process_scalar("subject", "subject_source")
+    date, date_passage, date_evidence = process_scalar("date", "date_source")
+    issuer, issuer_passage, issuer_evidence = process_scalar("issuer", "issuer_source")
+    recipient, recipient_passage, recipient_evidence = process_scalar("recipient", "recipient_source")
+    deadline, deadline_passage, deadline_evidence = process_scalar("deadline", "deadline_source")
+
+    # Section headings (list of non-empty strings)
+    section_headings: list[str] = []
+    raw_headings = parsed.get("section_headings")
+    if isinstance(raw_headings, list):
+        for h in raw_headings:
+            if isinstance(h, str) and h.strip():
+                clean_h = h.strip()
+                if clean_h not in section_headings:
+                    section_headings.append(clean_h)
+
+    # Key points list
+    key_points: list[dict] = []
+    raw_kp = parsed.get("key_points")
+    if isinstance(raw_kp, list):
+        for item in raw_kp:
+            if isinstance(item, dict):
+                kp_text = str(item.get("text", "")).strip()
+                if not kp_text:
+                    continue
+                raw_sp = item.get("source_passage")
+                v_passage = _validate_passage(raw_sp, doc_text, norm_doc)
+                evidence = _build_evidence_item(v_passage, words) if v_passage else None
+                key_points.append({
+                    "text": kp_text,
+                    "source_passage": v_passage,
+                    "evidence": evidence,
+                })
+            elif isinstance(item, str) and item.strip():
+                kp_text = item.strip()
+                v_passage = _validate_passage(kp_text, doc_text, norm_doc)
+                evidence = _build_evidence_item(v_passage, words) if v_passage else None
+                key_points.append({
+                    "text": kp_text,
+                    "source_passage": v_passage,
+                    "evidence": evidence,
+                })
+
+    # Action items list
+    action_items: list[dict] = []
+    raw_ai = parsed.get("action_items")
+    if isinstance(raw_ai, list):
+        for item in raw_ai:
+            if isinstance(item, dict):
+                ai_text = str(item.get("text", "")).strip()
+                if not ai_text:
+                    continue
+                raw_sp = item.get("source_passage")
+                v_passage = _validate_passage(raw_sp, doc_text, norm_doc)
+                evidence = _build_evidence_item(v_passage, words) if v_passage else None
+                action_items.append({
+                    "text": ai_text,
+                    "source_passage": v_passage,
+                    "evidence": evidence,
+                })
+            elif isinstance(item, str) and item.strip():
+                ai_text = item.strip()
+                v_passage = _validate_passage(ai_text, doc_text, norm_doc)
+                evidence = _build_evidence_item(v_passage, words) if v_passage else None
+                action_items.append({
+                    "text": ai_text,
+                    "source_passage": v_passage,
+                    "evidence": evidence,
+                })
+
+    return {
+        "subject": subject,
+        "date": date,
+        "issuer": issuer,
+        "recipient": recipient,
+        "deadline": deadline,
+        "section_headings": section_headings,
+        "key_points": key_points,
+        "action_items": action_items,
+        "field_evidence": {
+            "subject": {"source_passage": subject_passage, "evidence": subject_evidence},
+            "date": {"source_passage": date_passage, "evidence": date_evidence},
+            "issuer": {"source_passage": issuer_passage, "evidence": issuer_evidence},
+            "recipient": {"source_passage": recipient_passage, "evidence": recipient_evidence},
+            "deadline": {"source_passage": deadline_passage, "evidence": deadline_evidence},
+        },
         "provider": result["provider"],
         "model": result["model"],
     }

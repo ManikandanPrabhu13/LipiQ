@@ -16,7 +16,7 @@ from ai_service import (
     generate as generate_ai,
     get_provider,
 )
-from evidence_match import find_evidence, find_all_evidence, normalize
+from evidence_match import find_all_evidence, normalize
 
 
 # --------------------------------------------------
@@ -76,6 +76,14 @@ class AskRequest(DocumentTextRequest):
     words: list[dict] = Field(default_factory=list)
     image_width: int | None = Field(default=None, gt=0)
     image_height: int | None = Field(default=None, gt=0)
+
+
+class CorrectionRequest(BaseModel):
+    """Request body for Smart OCR Correction."""
+
+    text: str = Field(min_length=1, max_length=60000)
+    context: str | None = Field(default=None, max_length=60000)
+    word_confidences: dict | None = Field(default=None)
 
 
 AI_SYSTEM_PROMPT = (
@@ -485,6 +493,87 @@ def _build_evidence_item(passage: str | None, words: list[dict]) -> dict:
     }
 
 
+def _parse_or_repair_json(text: str) -> dict:
+    """Parse JSON or repair a partially truncated JSON response."""
+    import re as _re
+
+    cleaned = text.strip()
+    if cleaned.startswith("```json"):
+        cleaned = cleaned[7:]
+    elif cleaned.startswith("```"):
+        cleaned = cleaned[3:]
+    if cleaned.endswith("```"):
+        cleaned = cleaned[:-3]
+    cleaned = cleaned.strip()
+
+    # 1. Direct parse attempt
+    try:
+        data = json.loads(cleaned)
+        if isinstance(data, dict):
+            return data
+    except Exception:
+        pass
+
+    # 2. Substring between first { and last }
+    first_brace = cleaned.find("{")
+    if first_brace == -1:
+        return {}
+
+    candidate = cleaned[first_brace:]
+
+    # 3. Progressive repair of unterminated strings and brackets
+    for _ in range(6):
+        test_str = candidate
+        quotes = len(_re.findall(r'(?<!\\)"', test_str))
+        if quotes % 2 != 0:
+            test_str += '"'
+
+        test_str = _re.sub(r',\s*$', '', test_str)
+
+        stack = []
+        in_string = False
+        escape = False
+        for ch in test_str:
+            if escape:
+                escape = False
+                continue
+            if ch == '\\':
+                escape = True
+                continue
+            if ch == '"':
+                in_string = not in_string
+                continue
+            if not in_string:
+                if ch in ('{', '['):
+                    stack.append(ch)
+                elif ch == '}':
+                    if stack and stack[-1] == '{':
+                        stack.pop()
+                elif ch == ']':
+                    if stack and stack[-1] == '[':
+                        stack.pop()
+
+        closers = ''
+        for bracket in reversed(stack):
+            if bracket == '{':
+                closers += '}'
+            elif bracket == '[':
+                closers += ']'
+
+        try:
+            res = json.loads(test_str + closers)
+            if isinstance(res, dict):
+                return res
+        except Exception:
+            last_comma = candidate.rfind(',')
+            if last_comma > 0:
+                candidate = candidate[:last_comma]
+            else:
+                break
+
+    return {}
+
+
 @app.post("/api/insights")
 def extract_insights(request: InsightsRequest):
     """Automatically extract structured, evidence-backed insights from the document."""
@@ -504,25 +593,27 @@ def extract_insights(request: InsightsRequest):
         '  "deadline_source": "Verbatim quote from document for deadline, or null",\n'
         '  "section_headings": ["Heading 1", "Heading 2"],\n'
         '  "key_points": [\n'
-        '    {"text": "Key statement or fact", "source_passage": "Verbatim quote from document"}\n'
+        '    {"text": "Key statement or fact", "source_passage": "Short verbatim quote (max 15 words) from document"}\n'
         "  ],\n"
         '  "action_items": [\n'
-        '    {"text": "Specific required action or instruction", "source_passage": "Verbatim quote from document"}\n'
+        '    {"text": "Specific required action or instruction", "source_passage": "Short verbatim quote (max 15 words) from document"}\n'
         "  ]\n"
         "}\n\n"
         "STRICT GROUNDING RULES:\n"
         "1. Base ALL extractions exclusively and verbatim on the DOCUMENT text.\n"
-        "2. NEVER invent names, numbers, dates, deadlines, or facts.\n"
-        "3. If a field is not explicitly present in the document, set its value to null (or [] for lists).\n"
-        "4. Do NOT convert an announcement or informational statement into an action_item unless the document actually requests, commands, or requires an action from the reader or department.\n"
-        "5. Every source quote/passage MUST be copied verbatim from the document text.\n"
-        "6. Preserve original Kannada wording where applicable. Do not translate source excerpts.\n"
-        "7. Respond with raw JSON only (no markdown, no preamble, no code fences).\n\n"
+        "2. Extract up to 3 to 5 concise key points and important announcements from the document.\n"
+        "3. NEVER invent names, numbers, dates, deadlines, or facts.\n"
+        "4. If a field is not explicitly present in the document, set its value to null (or [] for lists).\n"
+        "5. Keep each source_passage concise (under 15 words) so it matches verbatim without truncation.\n"
+        "6. Do NOT convert an announcement or informational statement into an action_item unless the document actually requests, commands, or requires an action from the reader or department.\n"
+        "7. Every source quote/passage MUST be copied verbatim from the document text.\n"
+        "8. Preserve original Kannada wording where applicable. Do not translate source excerpts.\n"
+        "9. Respond with raw JSON only (no markdown, no preamble, no code fences).\n\n"
         "DOCUMENT:\n<<<\n"
         f"{request.text}\n>>>"
     )
 
-    result = _run_ai(user_prompt, max_tokens=1000)
+    result = _run_ai(user_prompt, max_tokens=800)
     raw_answer = result["answer"].strip()
 
     # Clean markdown block wrappers if present
@@ -535,11 +626,8 @@ def extract_insights(request: InsightsRequest):
         cleaned = cleaned[:-3]
     cleaned = cleaned.strip()
 
-    try:
-        parsed = json.loads(cleaned)
-        if not isinstance(parsed, dict):
-            parsed = {}
-    except (json.JSONDecodeError, ValueError):
+    parsed = _parse_or_repair_json(cleaned)
+    if not isinstance(parsed, dict):
         parsed = {}
 
     doc_text = request.text
@@ -654,3 +742,411 @@ def extract_insights(request: InsightsRequest):
         "provider": result["provider"],
         "model": result["model"],
     }
+
+
+# --------------------------------------------------
+# SMART OCR CORRECTION
+# --------------------------------------------------
+
+
+def _preserve_protected_content(text: str) -> bool:
+    """
+    Check if text contains protected content that must not be modified:
+    dates, phone numbers, addresses, application/registration numbers, IDs.
+    Returns True if protected content is found.
+    """
+    import re as _re
+
+    date_patterns = [
+        r"\d{1,2}[-/]\d{1,2}[-/]\d{2,4}",
+        r"\d{4}[-/]\d{1,2}[-/]\d{1,2}",
+        r"\d{1,2}\s+\w+\s+\d{2,4}",
+        r"\d{1,2}\s+of\s+\w+\s+\d{2,4}",
+    ]
+    phone_patterns = [
+        r"\+\d{1,3}\s?\d{1,4}\s?\d{1,4}\s?\d{1,9}",
+        r"\d{3}\s?\d{3}\s?\d{4}",
+        r"\(\d{3}\)\s?\d{3}\s?\d{4}",
+    ]
+    app_patterns = [r"A\d{6,8}", r"APPLICATION\s*[\/#]?\s*\d+", r"REGISTRATION\s*[\/#]?\s*\d+"]
+
+    for pattern in date_patterns:
+        if _re.search(pattern, text):
+            return True
+    for pattern in phone_patterns:
+        if _re.search(pattern, text):
+            return True
+    for pattern in app_patterns:
+        if _re.search(pattern, text, _re.IGNORECASE):
+            return True
+
+    return False
+
+
+def _split_into_tokens(text: str) -> list[tuple[str, int, int]]:
+    """
+    Split text into whitespace-separated tokens with character positions.
+    Returns list of (token_text, start_pos, end_pos) tuples.
+    """
+    tokens = []
+    i = 0
+    while i < len(text):
+        if text[i].isspace():
+            i += 1
+            continue
+        start = i
+        while i < len(text) and not text[i].isspace():
+            i += 1
+        tokens.append((text[start:i], start, i))
+    return tokens
+
+
+def _is_protected_token(token: str) -> bool:
+    """Check if a token is protected content (dates, numbers, phones, IDs)."""
+    import re as _re
+
+    if _re.match(r"^\d{1,2}[-/]\d{1,2}[-/]\d{2,4}$", token):
+        return True
+    if _re.match(r"^\d{4}[-/]\d{1,2}[-/]\d{1,2}$", token):
+        return True
+    if _re.match(r"^\+?\d{1,3}\s?\d{1,4}\s?\d{1,4}\s?\d{1,9}$", token):
+        return True
+    if _re.match(r"^\(\d{3}\)\s?\d{3}\s?\d{4}$", token):
+        return True
+    if _re.match(r"^\d{3}\s?\d{3}\s?\d{4}$", token):
+        return True
+    if _re.match(r"^A\d{6,8}$", token, _re.IGNORECASE):
+        return True
+    if _re.match(r"^APP[\/#]?\d+$", token, _re.IGNORECASE):
+        return True
+    if _re.match(r"^REG[\/#]?\d+$", token, _re.IGNORECASE):
+        return True
+    if token.replace(".", "", 1).replace(",", "").isdigit():
+        return True
+    if _re.match(r"^\d+%$", token):
+        return True
+    kannada_number_words = {
+        "ಒಂದು", "ಎರಡು", "ಮೂರು", "ನಾಲ್ಕು", "ಐದು", "ಆರು", "ಏಳು", "ಎಂಟು", "ಒಂಬತ್ತು", "ಹತ್ತು",
+        "ಹನ್ನೊಂದು", "ಹನ್ನೆರಡು", "ಹದಿಮೂರು", "ಹದಿನಾಲ್ಕು", "ಹದಿನೈದು", "ಹದಿನಾರು", "ಹದಿನೇಳು", "ಹದಿನೆಂಟು", "ಹತ್ತೊಂಬತ್ತು", "ಇಪ್ಪತ್ತು",
+        "ಮೂವತ್ತು", "ನಲವತ್ತು", "ಐವತ್ತು", "ಅರವತ್ತು", "ಎಪ್ಪತ್ತು", "ಎಂಬತ್ತು", "ತೊಂಬತ್ತು", "ನೂರು", "ಸಾವಿರ", "ಲಕ್ಷ", "ಕೋಟಿ",
+    }
+    if token in kannada_number_words:
+        return True
+    return False
+
+
+def _map_corrections_to_positions(
+    original_text: str,
+    raw_corrections: list[dict],
+) -> list[dict]:
+    """
+    Validate each AI correction against the original source text.
+    - Rejects corrections missing required fields
+    - Rejects corrections where suggested == original
+    - Maps each correction to exact character positions in the original text
+    - Handles repeated word occurrences by using start/end positions and proximity fallback
+    - Rejects untraceable corrections (word not found in tokens)
+    - Rejects protected content (dates, numbers, IDs, Kannada number words)
+    Returns list of validated corrections with start/end positions.
+    """
+    tokens = _split_into_tokens(original_text)
+    valid_corrections = []
+
+    # Map raw corrections by word to handle multiple occurrences reliably
+    word_to_corrs: dict[str, list[tuple[int, dict]]] = {}
+    for idx, corr in enumerate(raw_corrections):
+        orig = (corr.get("original") or "").strip()
+        word_to_corrs.setdefault(orig, []).append((idx, corr))
+
+    corr_to_token: dict[int, int] = {}
+    for word, c_list in word_to_corrs.items():
+        candidate_indices = [
+            i for i, (tok_text, _, _) in enumerate(tokens)
+            if tok_text == word
+        ]
+        if not candidate_indices:
+            continue
+
+        has_positions = all(c.get("start") is not None for _, c in c_list)
+        if has_positions and len(c_list) > 1:
+            sorted_clist = sorted(c_list, key=lambda x: x[1]["start"])
+            for (orig_idx, _), tok_idx in zip(sorted_clist, candidate_indices):
+                corr_to_token[orig_idx] = tok_idx
+        else:
+            avail = list(candidate_indices)
+            for orig_idx, corr in c_list:
+                start = corr.get("start")
+                end = corr.get("end")
+                chosen = None
+                if start is not None and end is not None:
+                    for c_idx in avail:
+                        _, s, e = tokens[c_idx]
+                        if not (s >= end or e <= start):
+                            chosen = c_idx
+                            break
+                    if chosen is None and avail:
+                        corr_center = (start + end) / 2.0
+                        chosen = min(
+                            avail,
+                            key=lambda idx: abs(((tokens[idx][1] + tokens[idx][2]) / 2.0) - corr_center),
+                        )
+                elif avail:
+                    chosen = avail[0]
+                if chosen is not None:
+                    corr_to_token[orig_idx] = chosen
+                    avail.remove(chosen)
+
+    for idx, corr in enumerate(raw_corrections):
+        original_word = (corr.get("original") or "").strip()
+        suggested = (corr.get("suggested") or "").strip()
+        reason = (corr.get("reason") or "").strip()
+        confidence = corr.get("confidence", "medium")
+
+        if not original_word or not suggested:
+            continue
+        if suggested == original_word:
+            continue
+        if confidence not in ("low", "medium", "high"):
+            confidence = "medium"
+        if _is_protected_token(original_word):
+            continue
+        if idx not in corr_to_token:
+            continue
+
+        tok_idx = corr_to_token[idx]
+        tok_text, tok_char_start, tok_char_end = tokens[tok_idx]
+
+        valid_corrections.append({
+            "original": original_word,
+            "suggested": suggested,
+            "reason": reason or "OCR likely misrecognized this word",
+            "confidence": confidence,
+            "status": "pending",
+            "start": tok_char_start,
+            "end": tok_char_end,
+        })
+
+    return valid_corrections
+
+
+def _apply_corrections_to_text(original_text: str, corrections: list[dict]) -> str:
+    """
+    Apply accepted or validated corrections to original text right-to-left
+    by character positions to prevent offset drift.
+    """
+    sorted_corrs = sorted(corrections, key=lambda c: c.get("start", 0), reverse=True)
+    text = original_text
+    for c in sorted_corrs:
+        s = c.get("start")
+        e = c.get("end")
+        sugg = c.get("suggested", "")
+        if s is not None and e is not None and 0 <= s <= e <= len(text):
+            text = text[:s] + sugg + text[e:]
+    return text
+
+
+def _generate_correction_prompt(
+    original_text: str,
+    context: str | None = None,
+    word_confidences: dict | None = None,
+) -> str:
+    """
+    Generate the AI prompt for Smart OCR Correction.
+    The AI must return structured JSON with word-level corrections,
+    not a rewritten document.
+    """
+    # Truncate text if too long (first 2000 chars, last 1000 chars)
+    max_len = 4000
+    if len(original_text) > max_len:
+        truncated = (
+            original_text[:2000]
+            + "\n... [text truncated] ...\n"
+            + original_text[-1000:]
+        )
+    else:
+        truncated = original_text
+
+    # Build word list with positions for the AI
+    tokens = _split_into_tokens(truncated)
+
+    word_positions = []
+    for i, (token_text, token_start, token_end) in enumerate(tokens[:100]):
+        word_positions.append(
+            f"  [{i}]: '{token_text}' at chars [{token_start}, {token_end})"
+        )
+
+    context_part = ""
+    if context:
+        context_part = (
+            "\n\nDOCUMENT CONTEXT (may help with proper nouns):\n" + context
+        )
+
+    prompt = f"""You are LipiQ's Smart OCR Correction system. Your task is to identify and suggest corrections for OCR recognition mistakes in Kannada document text.
+
+CRITICAL INSTRUCTIONS:
+1. Return ONLY a valid JSON object matching this exact schema:
+{{
+  "corrections": [
+    {{
+      "original": "exact word from original text",
+      "suggested": "corrected word",
+      "reason": "brief reason for the correction",
+      "confidence": "estimated model confidence (low|medium|high)",
+      "status": "pending",
+      "start": <integer-character-position-of-original>,
+      "end": <integer-character-position-of-original>
+    }}
+  ]
+}}
+Do NOT echo or repeat the entire original_text in the output JSON. Return only the corrections list.
+
+2. Each correction must:
+   - Match an exact occurrence in the original OCR text
+   - Include start and end character positions tracing to the source
+   - Include a reason explaining why this correction is needed
+   - Have a confidence level: low, medium, or high
+   - Have status "pending" (not yet accepted/rejected)
+   - NOT change dates, numbers, phone numbers, addresses, IDs, or proper nouns
+   - NOT translate Kannada into English
+   - NOT summarize or rewrite the document
+   - Correct ONLY likely OCR recognition mistakes
+
+3. If a word occurs multiple times, identify the exact occurrence using source positions or occurrence indices.
+4. If uncertain about a word, leave it unchanged (do not include it in corrections).
+5. Preserve paragraph breaks, punctuation, dates, numbers, names, and document structure.
+6. Do not use unrestricted global string replacement.
+7. Validate every suggestion against the original source text before returning.
+8. If a suggestion cannot be mapped reliably to its original position, reject it.
+
+9. Protected content that must NOT be modified:
+   - Dates (any format: 15-02-2014, 15/02/2014, 15 February 2014, etc.)
+   - Phone numbers
+   - Addresses
+   - Application numbers
+   - Registration numbers
+   - IDs/identifiers
+   - Proper nouns without strong evidence of OCR error
+
+10. Return at most 15 corrections. If more potential corrections exist, return only the most critical ones.
+
+{context_part}
+
+DOCUMENT TEXT:
+<<<
+{truncated}
+>>>
+
+Return ONLY the JSON object as specified above. No other text before or after.
+"""
+
+    return prompt
+
+
+@app.post("/api/correct-ocr", response_model=dict)
+async def correct_ocr(request: CorrectionRequest):
+    """
+    Smart OCR Correction endpoint.
+
+    Accepts original OCR text and returns structured suggestions for likely
+    OCR recognition mistakes. Each suggestion is word-level with source positions.
+    """
+    import re as _re
+
+    text = (request.text or "").strip()
+    context = request.context or ""
+    word_confidences = request.word_confidences or {}
+
+    # Handle empty text
+    if not text:
+        raise HTTPException(
+            status_code=400,
+            detail="No OCR text provided for correction.",
+        )
+
+    # Check if AI is configured
+    provider = get_provider()
+    if provider is None:
+        return {
+            "original_text": text,
+            "corrected_text": text,
+            "corrections": [],
+            "total_suggestions": 0,
+            "message": "AI not configured. OCR correction unavailable.",
+        }
+
+    has_protected = _preserve_protected_content(text)
+
+    # Generate the AI correction prompt
+    prompt = _generate_correction_prompt(text, context, word_confidences)
+
+    try:
+        result = generate_ai(
+            AI_SYSTEM_PROMPT,
+            prompt,
+            max_tokens=800,
+        )
+        raw_answer = result["answer"].strip()
+
+        # Parse or repair JSON response
+        parsed = _parse_or_repair_json(raw_answer)
+
+        if not isinstance(parsed, dict) or "corrections" not in parsed:
+            return {
+                "original_text": text,
+                "corrected_text": text,
+                "corrections": [],
+                "total_suggestions": 0,
+                "message": "No corrections identified or AI response incomplete.",
+            }
+
+        raw_corrections = parsed.get("corrections", [])
+        original_text = parsed.get("original_text", text)
+
+        # Validate and map corrections to source positions
+        valid_corrections = _map_corrections_to_positions(
+            original_text, raw_corrections
+        )
+
+        # Limit to 20 corrections max
+        if len(valid_corrections) > 20:
+            valid_corrections = valid_corrections[:20]
+
+        total_suggestions = len(valid_corrections)
+        corrected_text = _apply_corrections_to_text(original_text, valid_corrections)
+
+        message = f"{total_suggestions} correction{'s' if total_suggestions != 1 else ''} identified"
+        if has_protected:
+            message += ". Protected content (dates, numbers, etc.) will be preserved."
+
+        return {
+            "original_text": original_text,
+            "corrected_text": corrected_text,
+            "corrections": valid_corrections,
+            "total_suggestions": total_suggestions,
+            "message": message,
+        }
+
+    except AIUnavailableError:
+        return {
+            "original_text": text,
+            "corrected_text": text,
+            "corrections": [],
+            "total_suggestions": 0,
+            "message": "AI unavailable for correction.",
+        }
+    except AIRequestError as error:
+        return {
+            "original_text": text,
+            "corrected_text": text,
+            "corrections": [],
+            "total_suggestions": 0,
+            "message": f"AI request failed: {str(error)}",
+        }
+    except Exception as error:
+        return {
+            "original_text": text,
+            "corrected_text": text,
+            "corrections": [],
+            "total_suggestions": 0,
+            "message": f"Unexpected error during correction: {str(error)}",
+        }

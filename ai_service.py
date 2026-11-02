@@ -1,187 +1,325 @@
 
 """
-Optional AI helpers for LipiQ.
+LipiQ Multi-Provider AI Service
 
-OCR works without an AI provider.
-Supported providers:
-  - Groq: GROQ_API_KEY
-  - OpenRouter: OPENROUTER_API_KEY
-  - Ollama: OLLAMA_MODEL
+Providers:
+- Gemini
+- Groq
+- OpenAI
+- OpenRouter
+- Ollama (optional local fallback)
 
-Only extracted text is sent to the configured provider.
-Uploaded images are never sent by this module.
-Secrets are read from environment variables and never logged.
+Compatibility:
+- generate(system_prompt, user_prompt, max_tokens=700)
+- generate_ai(system_prompt, user_prompt, max_tokens=700)
+
+Only extracted document text is sent to AI providers.
+Original uploaded images are never sent by this module.
 """
-
-from __future__ import annotations
 
 import os
 from dataclasses import dataclass
 from typing import Any
 
 import requests
+from dotenv import load_dotenv
 
-try:
-    from dotenv import load_dotenv
-    load_dotenv()
-except ImportError:
-    pass
+load_dotenv()
 
-
-GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
-OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
-OLLAMA_DEFAULT_URL = "http://127.0.0.1:11434"
 REQUEST_TIMEOUT_SECONDS = 60
 
-
-class AIUnavailableError(RuntimeError):
-    """No AI provider is configured."""
-
-
-class AIRequestError(RuntimeError):
-    """The configured provider failed or returned an unusable response."""
+GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
+OPENAI_URL = "https://api.openai.com/v1/chat/completions"
+OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
+GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/models"
+OLLAMA_DEFAULT_URL = "http://127.0.0.1:11434"
 
 
-@dataclass(frozen=True)
+class AIUnavailableError(Exception):
+    """Raised when no AI provider is configured."""
+
+
+class AIRequestError(Exception):
+    """Raised when all configured AI providers fail."""
+
+
+@dataclass
 class AIProvider:
     name: str
     model: str
+    api_key: str = ""
+    base_url: str = ""
+
+
+def _env(name: str, default: str = "") -> str:
+    return os.getenv(name, default).strip()
+
+
+def get_providers() -> list[AIProvider]:
+    """Return configured providers in the specified fallback order."""
+
+    defaults = {
+        "gemini": "gemini-3.8-flash",
+        "groq": "llama-3.3-70b-versatile",
+        "openai": "gpt-4.1-mini",
+        "openrouter": "openrouter/auto",
+        "ollama": "llama3.2",
+    }
+
+    order = _env(
+        "AI_PROVIDER_ORDER",
+        "groq,gemini,openai,openrouter,ollama",
+    )
+
+    providers = []
+
+    for name in order.split(","):
+        name = name.strip().lower()
+
+        if name not in defaults:
+            continue
+
+        model = _env(
+            f"{name.upper()}_MODEL",
+            defaults[name],
+        )
+
+        if name == "gemini":
+            key = _env("GEMINI_API_KEY")
+            if key:
+                providers.append(
+                    AIProvider(name, model, key)
+                )
+
+        elif name == "groq":
+            key = _env("GROQ_API_KEY")
+            if key:
+                providers.append(
+                    AIProvider(name, model, key, GROQ_URL)
+                )
+
+        elif name == "openai":
+            key = _env("OPENAI_API_KEY")
+            if key:
+                providers.append(
+                    AIProvider(name, model, key, OPENAI_URL)
+                )
+
+        elif name == "openrouter":
+            key = _env("OPENROUTER_API_KEY")
+            if key:
+                providers.append(
+                    AIProvider(name, model, key, OPENROUTER_URL)
+                )
+
+        elif name == "ollama":
+            base_url = _env(
+                "OLLAMA_BASE_URL",
+                OLLAMA_DEFAULT_URL,
+            )
+            providers.append(
+                AIProvider(name, model, "", base_url)
+            )
+
+    return providers
 
 
 def get_provider() -> AIProvider | None:
-    """Return the configured provider without exposing credentials."""
-
-    # Prefer Groq when its API key is available.
-    if os.environ.get("GROQ_API_KEY"):
-        return AIProvider(
-            name="groq",
-            model=os.environ.get(
-                "GROQ_MODEL",
-                "llama-3.3-70b-versatile",
-            ),
-        )
-
-    if os.environ.get("OPENROUTER_API_KEY"):
-        return AIProvider(
-            name="openrouter",
-            model=os.environ.get(
-                "OPENROUTER_MODEL",
-                "openrouter/auto",
-            ),
-        )
-
-    if os.environ.get("OLLAMA_MODEL"):
-        return AIProvider(
-            name="ollama",
-            model=os.environ["OLLAMA_MODEL"],
-        )
-
-    return None
+    """Return the first configured provider for backward compatibility."""
+    providers = get_providers()
+    return providers[0] if providers else None
 
 
 def is_configured() -> bool:
-    return get_provider() is not None
+    return bool(get_providers())
 
 
-def _cloud_generate(
-    url: str,
-    api_key: str,
-    model: str,
-    messages: list[dict[str, str]],
+def _check_response(response, provider_name: str) -> None:
+    """Raise a useful provider error for unsuccessful HTTP responses."""
+
+    if response.ok:
+        return
+
+    status = response.status_code
+    message = f"{provider_name} API error ({status})"
+
+    if status in (401, 403):
+        message += ": authentication or permission issue"
+    elif status == 429:
+        message += ": rate limit or quota exceeded"
+    elif status >= 500:
+        message += ": provider server error"
+    else:
+        message += f": {response.text[:500]}"
+
+    raise AIRequestError(message)
+
+
+def _openai_compatible_generate(
+    provider: AIProvider,
+    prompt: str,
+    system_prompt: str,
     max_tokens: int,
-    provider_name: str,
 ) -> str:
+
     headers = {
-        "Authorization": f"Bearer {api_key}",
+        "Authorization": f"Bearer {provider.api_key}",
         "Content-Type": "application/json",
     }
 
-    if provider_name == "openrouter":
-        headers["X-Title"] = "LipiQ"
+    if provider.name == "openrouter":
+        headers["HTTP-Referer"] = "https://lipiq.app"
+        headers["X-Title"] = "LipiQ Kannada Document AI"
 
     payload = {
-        "model": model,
-        "messages": messages,
+        "model": provider.model,
+        "messages": [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": prompt},
+        ],
         "temperature": 0.2,
         "max_tokens": max_tokens,
     }
 
-    try:
-        response = requests.post(
-            url,
-            headers=headers,
-            json=payload,
-            timeout=REQUEST_TIMEOUT_SECONDS,
-        )
-    except requests.RequestException as error:
-        raise AIRequestError(
-            f"Could not reach {provider_name}."
-        ) from error
+    response = requests.post(
+        provider.base_url,
+        headers=headers,
+        json=payload,
+        timeout=REQUEST_TIMEOUT_SECONDS,
+    )
 
-    if response.status_code >= 400:
-        # Do not expose API keys or raw provider responses to users.
-        raise AIRequestError(
-            f"{provider_name} returned HTTP {response.status_code}. "
-            "Check the API key, model availability, and provider limits."
-        )
+    _check_response(response, provider.name)
 
     try:
         data = response.json()
-        content = data["choices"][0]["message"]["content"]
-
-        if isinstance(content, str):
-            return content.strip()
-
-        raise TypeError("Unexpected response content type.")
-    except (ValueError, KeyError, IndexError, TypeError) as error:
+        answer = data["choices"][0]["message"]["content"]
+    except (ValueError, KeyError, IndexError, TypeError) as exc:
         raise AIRequestError(
-            f"{provider_name} returned an unexpected response."
-        ) from error
+            f"{provider.name} returned an invalid response: {exc}"
+        ) from exc
+
+    if not isinstance(answer, str) or not answer.strip():
+        raise AIRequestError(
+            f"{provider.name} returned an empty response"
+        )
+
+    return answer.strip()
+
+
+def _gemini_generate(
+    provider: AIProvider,
+    prompt: str,
+    system_prompt: str,
+    max_tokens: int,
+) -> str:
+
+    url = (
+        f"{GEMINI_URL}/{provider.model}:generateContent"
+        f"?key={provider.api_key}"
+    )
+
+    payload = {
+        "systemInstruction": {
+            "parts": [{"text": system_prompt}]
+        },
+        "contents": [
+            {
+                "role": "user",
+                "parts": [{"text": prompt}],
+            }
+        ],
+        "generationConfig": {
+            "temperature": 0.2,
+            "maxOutputTokens": max_tokens,
+        },
+    }
+
+    response = requests.post(
+        url,
+        json=payload,
+        timeout=REQUEST_TIMEOUT_SECONDS,
+    )
+
+    _check_response(response, provider.name)
+
+    try:
+        data = response.json()
+        answer = data["candidates"][0]["content"]["parts"][0]["text"]
+    except (ValueError, KeyError, IndexError, TypeError) as exc:
+        raise AIRequestError(
+            f"Gemini returned an invalid response: {exc}"
+        ) from exc
+
+    if not isinstance(answer, str) or not answer.strip():
+        raise AIRequestError("Gemini returned an empty response")
+
+    return answer.strip()
 
 
 def _ollama_generate(
     provider: AIProvider,
-    messages: list[dict[str, str]],
+    prompt: str,
+    system_prompt: str,
     max_tokens: int,
 ) -> str:
-    base_url = os.environ.get(
-        "OLLAMA_BASE_URL",
-        OLLAMA_DEFAULT_URL,
-    ).rstrip("/")
+
+    url = f"{provider.base_url.rstrip('/')}/api/chat"
 
     payload = {
         "model": provider.model,
-        "messages": messages,
+        "messages": [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": prompt},
+        ],
         "stream": False,
         "options": {
-            "temperature": 0.2,
             "num_predict": max_tokens,
+            "temperature": 0.2,
         },
     }
 
-    try:
-        response = requests.post(
-            f"{base_url}/api/chat",
-            json=payload,
-            timeout=REQUEST_TIMEOUT_SECONDS,
-        )
-    except requests.RequestException as error:
-        raise AIRequestError(
-            "Could not reach the local Ollama server."
-        ) from error
+    response = requests.post(
+        url,
+        json=payload,
+        timeout=REQUEST_TIMEOUT_SECONDS,
+    )
 
-    if response.status_code >= 400:
-        raise AIRequestError(
-            f"Ollama returned HTTP {response.status_code}."
-        )
+    _check_response(response, provider.name)
 
     try:
         data = response.json()
-        return str(data["message"]["content"]).strip()
-    except (ValueError, KeyError, TypeError) as error:
+        answer = data["message"]["content"]
+    except (ValueError, KeyError, TypeError) as exc:
         raise AIRequestError(
-            "Ollama returned an unexpected response."
-        ) from error
+            f"Ollama returned an invalid response: {exc}"
+        ) from exc
+
+    if not isinstance(answer, str) or not answer.strip():
+        raise AIRequestError("Ollama returned an empty response")
+
+    return answer.strip()
+
+
+def _generate_with_provider(
+    provider: AIProvider,
+    prompt: str,
+    system_prompt: str,
+    max_tokens: int,
+) -> str:
+
+    if provider.name == "gemini":
+        return _gemini_generate(
+            provider, prompt, system_prompt, max_tokens
+        )
+
+    if provider.name == "ollama":
+        return _ollama_generate(
+            provider, prompt, system_prompt, max_tokens
+        )
+
+    return _openai_compatible_generate(
+        provider, prompt, system_prompt, max_tokens
+    )
 
 
 def generate(
@@ -189,54 +327,67 @@ def generate(
     user_prompt: str,
     max_tokens: int = 700,
 ) -> dict[str, Any]:
-    """Generate text and return the answer with provider/model details."""
+    """
+    Generate text using configured providers.
 
-    provider = get_provider()
+    Tries providers in order and automatically falls back
+    when a provider request fails.
+    """
 
-    if provider is None:
+    if not isinstance(max_tokens, int) or max_tokens < 1:
+        raise ValueError("max_tokens must be a positive integer")
+
+    providers = get_providers()
+
+    if not providers:
         raise AIUnavailableError(
-            "AI features are not configured. Set GROQ_API_KEY, "
-            "OPENROUTER_API_KEY, or OLLAMA_MODEL, then restart the API. "
-            "OCR continues to work without AI."
+            "No AI provider configured. Add an API key to .env."
         )
 
-    messages = [
-        {"role": "system", "content": system_prompt},
-        {"role": "user", "content": user_prompt},
-    ]
+    errors = []
 
-    if provider.name == "groq":
-        answer = _cloud_generate(
-            GROQ_URL,
-            os.environ["GROQ_API_KEY"],
-            provider.model,
-            messages,
-            max_tokens,
-            "groq",
-        )
-    elif provider.name == "openrouter":
-        answer = _cloud_generate(
-            OPENROUTER_URL,
-            os.environ["OPENROUTER_API_KEY"],
-            provider.model,
-            messages,
-            max_tokens,
-            "openrouter",
-        )
-    else:
-        answer = _ollama_generate(
-            provider,
-            messages,
-            max_tokens,
-        )
+    for provider in providers:
+        try:
+            answer = _generate_with_provider(
+                provider,
+                user_prompt,
+                system_prompt,
+                max_tokens,
+            )
 
-    if not answer:
-        raise AIRequestError(
-            "The AI provider returned an empty answer."
-        )
+            return {
+                "answer": answer,
+                "provider": provider.name,
+                "model": provider.model,
+            }
 
-    return {
-        "answer": answer,
-        "provider": provider.name,
-        "model": provider.model,
-    }
+        except (requests.RequestException, AIRequestError, ValueError) as exc:
+            errors.append(
+                f"{provider.name}: {str(exc)[:300]}"
+            )
+            continue
+
+        except Exception as exc:
+            errors.append(
+                f"{provider.name}: unexpected error: {str(exc)[:300]}"
+            )
+            continue
+
+    raise AIRequestError(
+        "All configured AI providers failed. "
+        + " | ".join(errors)
+    )
+
+
+def generate_ai(
+    system_prompt: str,
+    user_prompt: str,
+    max_tokens: int = 700,
+) -> dict[str, Any]:
+    """Compatibility wrapper used by existing LipiQ backend endpoints."""
+
+    return generate(
+        system_prompt,
+        user_prompt,
+        max_tokens=max_tokens,
+    )

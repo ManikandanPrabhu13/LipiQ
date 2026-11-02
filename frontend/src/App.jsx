@@ -49,6 +49,13 @@ function App() {
   const [aiConfigured, setAiConfigured] = useState(false);
   const [aiStatusChecked, setAiStatusChecked] = useState(false);
 
+  // Smart OCR Correction state
+  const [corrections, setCorrections] = useState([]);
+  const [correctedText, setCorrectedText] = useState("");
+  const [correctionLoading, setCorrectionLoading] = useState(false);
+  const [correctionMessage, setCorrectionMessage] = useState("");
+  const [correctionCopied, setCorrectionCopied] = useState(false);
+
   useEffect(() => {
     return () => {
       if (preview) URL.revokeObjectURL(preview);
@@ -97,6 +104,10 @@ function App() {
     setSupportingEvidence([]);
     setActivePassageIndex(null);
     setInsights(null);
+    setCorrections([]);
+    setCorrectedText("");
+    setCorrectionMessage("");
+    setCorrectionCopied(false);
   }
 
   function handleFileChange(event) {
@@ -448,6 +459,113 @@ function App() {
     setOccurrenceIndex((index) => Math.min(occurrences.length - 1, index + 1));
   }
 
+  // Smart OCR Correction handlers
+  function computeCorrectedText(currentCorrs, baseText) {
+    const accepted = currentCorrs.filter((c) => c.status === "accepted");
+    // Sort descending by start position to avoid offset drift
+    const sorted = [...accepted].sort((a, b) => (b.start ?? 0) - (a.start ?? 0));
+    let text = baseText;
+    for (const c of sorted) {
+      const s = c.start;
+      const e = c.end;
+      if (s !== undefined && e !== undefined && s >= 0 && e <= text.length && s <= e) {
+        text = text.slice(0, s) + c.suggested + text.slice(e);
+      }
+    }
+    return text;
+  }
+
+  async function requestCorrections() {
+    const textToCorrect = editedText.trim();
+    if (!textToCorrect) {
+      setError("Please ensure there is extracted or edited text to correct.");
+      return;
+    }
+
+    setCorrectionLoading(true);
+    setCorrectionMessage("");
+    setError("");
+
+    try {
+      const response = await fetch(`${API_BASE}/api/correct-ocr`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          text: textToCorrect,
+          context: null,
+          word_confidences: null,
+        }),
+      });
+
+      const data = await readResponse(response, "Smart OCR correction failed.");
+      const list = Array.isArray(data.corrections) ? data.corrections : [];
+      setCorrections(list);
+      setCorrectionMessage(data.message || `${list.length} correction suggestions found.`);
+      setCorrectedText(data.corrected_text || textToCorrect);
+    } catch (err) {
+      setError(`Smart correction error: ${err.message}`);
+    } finally {
+      setCorrectionLoading(false);
+    }
+  }
+
+  function handleAcceptCorrection(index) {
+    const updated = corrections.map((item, idx) =>
+      idx === index ? { ...item, status: "accepted" } : item
+    );
+    setCorrections(updated);
+    setCorrectedText(computeCorrectedText(updated, editedText));
+  }
+
+  function handleRejectCorrection(index) {
+    const updated = corrections.map((item, idx) =>
+      idx === index ? { ...item, status: "rejected" } : item
+    );
+    setCorrections(updated);
+    setCorrectedText(computeCorrectedText(updated, editedText));
+  }
+
+  function handleAcceptAllCorrections() {
+    const updated = corrections.map((item) => ({ ...item, status: "accepted" }));
+    setCorrections(updated);
+    setCorrectedText(computeCorrectedText(updated, editedText));
+  }
+
+  function handleRejectAllCorrections() {
+    const updated = corrections.map((item) => ({ ...item, status: "rejected" }));
+    setCorrections(updated);
+    setCorrectedText(editedText);
+  }
+
+  async function copyCorrectedText() {
+    if (!correctedText.trim()) return;
+    try {
+      await navigator.clipboard.writeText(correctedText);
+      setCorrectionCopied(true);
+      setTimeout(() => setCorrectionCopied(false), 2000);
+    } catch {
+      setError("Could not copy corrected text to clipboard.");
+    }
+  }
+
+  function downloadCorrectedText() {
+    if (!correctedText.trim()) return;
+    const blob = new Blob([correctedText], { type: "text/plain;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = "lipiq-smart-corrected.txt";
+    link.click();
+    URL.revokeObjectURL(url);
+  }
+
+  function applyCorrectionsToEditor() {
+    if (!correctedText.trim()) return;
+    setEditedText(correctedText);
+    setSummary("");
+    setAnswer("");
+  }
+
   return (
     <div className="app-shell">
       <header className="topbar">
@@ -786,10 +904,284 @@ function App() {
                 </div>
               </section>
 
-              {/* AI summary */}
+              {/* Smart OCR Correction */}
               <section className="result-panel" style={featurePanelStyle}>
                 <div className="panel-heading">
                   <span>04</span>
+                  <h3>Smart OCR Correction</h3>
+                </div>
+
+                <p className="click-hint">
+                  Analyze extracted Kannada text to automatically detect likely OCR character recognition mistakes.
+                  Review and accept or reject suggested corrections individually or all at once.
+                </p>
+
+                {!aiStatusChecked ? (
+                  <p role="status">Checking AI availability...</p>
+                ) : !aiConfigured ? (
+                  <p role="status">
+                    AI features are not configured. Configure an AI provider in backend .env to enable Smart OCR Correction.
+                  </p>
+                ) : (
+                  <div style={actionRowStyle}>
+                    <button
+                      type="button"
+                      className="primary-button"
+                      onClick={requestCorrections}
+                      disabled={correctionLoading || !editedText.trim()}
+                    >
+                      {correctionLoading ? "Analyzing OCR text..." : "✨ Smart Correct OCR"}
+                    </button>
+                  </div>
+                )}
+
+                {correctionLoading && (
+                  <p role="status" style={{ marginTop: "12px", color: "#6a5acd" }}>
+                    Analyzing text and verifying character substitutions with AI...
+                  </p>
+                )}
+
+                {correctionMessage && (
+                  <div
+                    style={{
+                      marginTop: "14px",
+                      padding: "10px 14px",
+                      background: "#f4f1fa",
+                      borderRadius: "8px",
+                      fontSize: "13px",
+                      color: "#473c78",
+                      border: "1px solid #e0daf0",
+                    }}
+                  >
+                    {correctionMessage}
+                  </div>
+                )}
+
+                {corrections.length > 0 && (
+                  <div style={{ marginTop: "18px" }}>
+                    {/* Status header & bulk action buttons */}
+                    <div
+                      style={{
+                        display: "flex",
+                        justifyContent: "space-between",
+                        alignItems: "center",
+                        flexWrap: "wrap",
+                        gap: "10px",
+                        marginBottom: "12px",
+                      }}
+                    >
+                      <div style={{ fontSize: "12px", fontWeight: "600", color: "#373449" }}>
+                        Suggestions:{" "}
+                        <span style={{ color: "#2e7d32" }}>
+                          {corrections.filter((c) => c.status === "accepted").length} accepted
+                        </span>
+                        {" · "}
+                        <span style={{ color: "#c62828" }}>
+                          {corrections.filter((c) => c.status === "rejected").length} rejected
+                        </span>
+                        {" · "}
+                        <span style={{ color: "#6a5acd" }}>
+                          {corrections.filter((c) => c.status === "pending").length} pending
+                        </span>
+                      </div>
+
+                      <div style={{ display: "flex", gap: "8px" }}>
+                        <button
+                          type="button"
+                          className="copy-button"
+                          onClick={handleAcceptAllCorrections}
+                          style={{ fontSize: "11px", padding: "4px 10px" }}
+                        >
+                          Accept all
+                        </button>
+                        <button
+                          type="button"
+                          className="copy-button"
+                          onClick={handleRejectAllCorrections}
+                          style={{ fontSize: "11px", padding: "4px 10px" }}
+                        >
+                          Reject all
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Individual suggestion cards */}
+                    <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
+                      {corrections.map((corr, idx) => (
+                        <div
+                          key={idx}
+                          style={{
+                            padding: "12px 14px",
+                            background:
+                              corr.status === "accepted"
+                                ? "#f1f8f3"
+                                : corr.status === "rejected"
+                                ? "#fdf2f2"
+                                : "#fff",
+                            border: `1px solid ${
+                              corr.status === "accepted"
+                                ? "#b7dfc3"
+                                : corr.status === "rejected"
+                                ? "#f5c2c2"
+                                : "#e6e2f5"
+                            }`,
+                            borderRadius: "8px",
+                            display: "flex",
+                            flexDirection: "column",
+                            gap: "8px",
+                          }}
+                        >
+                          <div
+                            style={{
+                              display: "flex",
+                              justifyContent: "space-between",
+                              alignItems: "center",
+                              flexWrap: "wrap",
+                              gap: "8px",
+                            }}
+                          >
+                            <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+                              <span
+                                lang="kn"
+                                style={{
+                                  fontSize: "14px",
+                                  fontWeight: "600",
+                                  color: "#a32d2d",
+                                  textDecoration: "line-through",
+                                }}
+                              >
+                                {corr.original}
+                              </span>
+                              <span style={{ fontSize: "12px", color: "#8a8799" }}>→</span>
+                              <span
+                                lang="kn"
+                                style={{
+                                  fontSize: "14px",
+                                  fontWeight: "700",
+                                  color: "#1e7e34",
+                                }}
+                              >
+                                {corr.suggested}
+                              </span>
+                              <span
+                                style={{
+                                  fontSize: "10px",
+                                  padding: "2px 6px",
+                                  borderRadius: "4px",
+                                  background:
+                                    corr.confidence === "high"
+                                      ? "#e8f5e9"
+                                      : corr.confidence === "medium"
+                                      ? "#fff3e0"
+                                      : "#f5f5f5",
+                                  color:
+                                    corr.confidence === "high"
+                                      ? "#2e7d32"
+                                      : corr.confidence === "medium"
+                                      ? "#e65100"
+                                      : "#757575",
+                                  fontWeight: "600",
+                                  textTransform: "uppercase",
+                                }}
+                              >
+                                {corr.confidence} confidence
+                              </span>
+                            </div>
+
+                            <div style={{ display: "flex", gap: "6px" }}>
+                              <button
+                                type="button"
+                                onClick={() => handleAcceptCorrection(idx)}
+                                style={{
+                                  fontSize: "11px",
+                                  padding: "4px 8px",
+                                  borderRadius: "4px",
+                                  border: "1px solid #2e7d32",
+                                  background: corr.status === "accepted" ? "#2e7d32" : "#fff",
+                                  color: corr.status === "accepted" ? "#fff" : "#2e7d32",
+                                  cursor: "pointer",
+                                  fontWeight: "600",
+                                }}
+                              >
+                                ✓ Accept
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => handleRejectCorrection(idx)}
+                                style={{
+                                  fontSize: "11px",
+                                  padding: "4px 8px",
+                                  borderRadius: "4px",
+                                  border: "1px solid #c62828",
+                                  background: corr.status === "rejected" ? "#c62828" : "#fff",
+                                  color: corr.status === "rejected" ? "#fff" : "#c62828",
+                                  cursor: "pointer",
+                                  fontWeight: "600",
+                                }}
+                              >
+                                ✗ Reject
+                              </button>
+                            </div>
+                          </div>
+
+                          {corr.reason && (
+                            <div style={{ fontSize: "11px", color: "#66617b" }}>
+                              Reason: {corr.reason}
+                            </div>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+
+                    {/* Corrected text preview & actions */}
+                    <div style={{ marginTop: "18px" }}>
+                      <label style={labelStyle}>
+                        Corrected document text (reflects accepted suggestions)
+                      </label>
+                      <textarea
+                        lang="kn"
+                        aria-label="Smart corrected Kannada text"
+                        value={correctedText}
+                        onChange={(e) => setCorrectedText(e.target.value)}
+                        rows={7}
+                        style={textAreaStyle}
+                      />
+
+                      <div style={actionRowStyle}>
+                        <button
+                          type="button"
+                          className="copy-button"
+                          onClick={copyCorrectedText}
+                          disabled={!correctedText.trim()}
+                        >
+                          {correctionCopied ? "Copied!" : "Copy corrected text"}
+                        </button>
+                        <button
+                          type="button"
+                          className="copy-button"
+                          onClick={downloadCorrectedText}
+                          disabled={!correctedText.trim()}
+                        >
+                          Download corrected .txt ↗
+                        </button>
+                        <button
+                          type="button"
+                          className="primary-button"
+                          onClick={applyCorrectionsToEditor}
+                          disabled={!correctedText.trim()}
+                        >
+                          Apply to main editor
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </section>
+
+              {/* AI summary */}
+              <section className="result-panel" style={featurePanelStyle}>
+                <div className="panel-heading">
+                  <span>05</span>
                   <h3>Document summary</h3>
                 </div>
 
@@ -834,7 +1226,7 @@ function App() {
               {/* Document Insights */}
               <section className="result-panel" style={featurePanelStyle}>
                 <div className="panel-heading">
-                  <span>05</span>
+                  <span>06</span>
                   <h3>Document insights</h3>
                 </div>
 
@@ -1056,7 +1448,7 @@ function App() {
               {/* Grounded document Q&A */}
               <section className="result-panel" style={featurePanelStyle}>
                 <div className="panel-heading">
-                  <span>06</span>
+                  <span>07</span>
                   <h3>Ask your document</h3>
                 </div>
 

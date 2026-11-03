@@ -27,6 +27,7 @@ function App() {
   const [file, setFile] = useState(null);
   const [preview, setPreview] = useState("");
   const [loading, setLoading] = useState(false);
+  const [extractProgress, setExtractProgress] = useState("");
   const [evidenceLoading, setEvidenceLoading] = useState(false);
   const [error, setError] = useState("");
   const [result, setResult] = useState(null);
@@ -456,7 +457,10 @@ function App() {
       return;
     }
 
+    if (loading) return; // Prevent duplicate concurrent extractions
+
     setLoading(true);
+    setExtractProgress("Optimizing image and running neural OCR...");
     setError("");
     resetDocumentResults();
 
@@ -491,6 +495,7 @@ function App() {
       );
     } finally {
       setLoading(false);
+      setExtractProgress("");
     }
   }
 
@@ -1123,6 +1128,11 @@ function App() {
                   {loading ? "Extracting text..." : "Extract Kannada text"}
                   {!loading && <span>↗</span>}
                 </button>
+              )}
+              {loading && extractProgress && (
+                <p role="status" style={{ marginTop: "8px", fontSize: "13px", color: "var(--accent)" }}>
+                  {extractProgress}
+                </p>
               )}
             </div>
           </div>

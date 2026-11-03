@@ -398,19 +398,57 @@ def _run_ai(user_prompt: str, max_tokens: int) -> dict:
 
 @app.post("/api/summarize")
 def summarize_document(request: DocumentTextRequest):
-    """Summarize extracted text without changing the OCR output."""
+    """Summarize extracted text in both English and genuine Kannada script."""
     prompt = (
-        "Summarize the following extracted Kannada document. "
-        "Write the summary in the language of the document. "
-        "Give 3-6 sentences, then 3-6 short key points.\n\n"
+        "Respond ONLY with a valid JSON object matching this schema:\n"
+        "{\n"
+        '  "summary_en": "A clear, concise summary in English (2-4 sentences), followed by bullet points of key takeaways.",\n'
+        '  "summary_kn": "A clear, concise summary written genuinely in Kannada script (ಕನ್ನಡ ಲಿಪಿ) (2-4 sentences), followed by bullet points of key takeaways."\n'
+        "}\n\n"
+        "Rules:\n"
+        '1. "summary_en" MUST be in fluent English.\n'
+        '2. "summary_kn" MUST be authentically written in genuine Kannada script (ಕನ್ನಡದಲ್ಲಿ ಬರೆಯಿರಿ). Do NOT transliterate English into Kannada script.\n'
+        "3. Base your summary solely on the DOCUMENT text.\n"
+        "4. Respond with raw JSON only (no markdown code blocks, no preamble, no postscript).\n\n"
         "DOCUMENT:\n<<<\n"
         f"{request.text}\n>>>"
     )
 
-    result = _run_ai(prompt, max_tokens=450)
+    result = _run_ai(prompt, max_tokens=650)
+    raw_answer = result["answer"].strip()
+
+    # Strip markdown block wrappers if present
+    cleaned = raw_answer
+    if cleaned.startswith("```json"):
+        cleaned = cleaned[7:]
+    elif cleaned.startswith("```"):
+        cleaned = cleaned[3:]
+    if cleaned.endswith("```"):
+        cleaned = cleaned[:-3]
+    cleaned = cleaned.strip()
+
+    summary_en = ""
+    summary_kn = ""
+
+    try:
+        parsed = json.loads(cleaned)
+        if isinstance(parsed, dict):
+            summary_en = str(parsed.get("summary_en") or "").strip()
+            summary_kn = str(parsed.get("summary_kn") or "").strip()
+    except Exception:
+        pass
+
+    # Graceful fallback: if parsing fails or fields are empty, keep original answer
+    if not summary_en and not summary_kn:
+        summary_en = raw_answer
+        summary_kn = raw_answer
+
+    unified_summary = summary_kn if summary_kn else summary_en
 
     return {
-        "summary": result["answer"],
+        "summary": unified_summary,
+        "summary_en": summary_en,
+        "summary_kn": summary_kn,
         "provider": result["provider"],
         "model": result["model"],
     }

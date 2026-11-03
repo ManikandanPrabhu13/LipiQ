@@ -38,6 +38,8 @@ function App() {
   // Editable OCR output and AI features
   const [editedText, setEditedText] = useState("");
   const [summary, setSummary] = useState("");
+  const [summaryEn, setSummaryEn] = useState("");
+  const [summaryKn, setSummaryKn] = useState("");
   const [summaryLoading, setSummaryLoading] = useState(false);
   const [question, setQuestion] = useState("");
   const [answer, setAnswer] = useState("");
@@ -217,7 +219,7 @@ function App() {
     }
 
     // Determine target raw text
-    const rawText = voiceSource === "summary" ? summary.trim() : editedText.trim();
+    const rawText = voiceSource === "summary" ? ((voiceLang === "kn-IN" ? (summaryKn || summary) : (summaryEn || summary))).trim() : editedText.trim();
     if (!rawText) {
       setVoiceWarning(
         voiceSource === "summary"
@@ -406,6 +408,8 @@ function App() {
     setEvidence(null);
     setOccurrenceIndex(0);
     setSummary("");
+    setSummaryEn("");
+    setSummaryKn("");
     setQuestion("");
     setAnswer("");
     setIsSupported(null);
@@ -601,6 +605,8 @@ function App() {
 
     setSummaryLoading(true);
     setSummary("");
+    setSummaryEn("");
+    setSummaryKn("");
     setError("");
 
     try {
@@ -619,7 +625,12 @@ function App() {
         "Unable to summarize this document."
       );
 
-      setSummary(data.summary || "No summary was returned.");
+      const en = data.summary_en || "";
+      const kn = data.summary_kn || "";
+      const main = data.summary || kn || en || "No summary was returned.";
+      setSummary(main);
+      setSummaryEn(en);
+      setSummaryKn(kn);
     } catch (err) {
       setError(`Summary failed: ${err.message}`);
     } finally {
@@ -1335,29 +1346,65 @@ function App() {
                   </div>
                 )}
 
-                {summary && (
-                  <div style={outputStyle}>
-                    <h4 style={{ marginBottom: "8px" }}>Summary</h4>
-                    <p style={paragraphStyle} lang="kn">
-                      {voicePlaying && voiceSource === "summary" && activeSentenceIndex !== null ? (
-                        getSentenceSegments(summary).map((seg, idx) => (
-                          <span
-                            key={idx}
-                            style={{
-                              background: idx === activeSentenceIndex ? "rgba(114, 92, 222, 0.22)" : "transparent",
-                              borderRadius: "4px",
-                              padding: idx === activeSentenceIndex ? "2px 4px" : "0",
-                              transition: "background 0.2s ease",
-                              fontWeight: idx === activeSentenceIndex ? "600" : "normal",
-                            }}
-                          >
-                            {seg}
-                          </span>
-                        ))
-                      ) : (
-                        summary
-                      )}
-                    </p>
+                {(summary || summaryEn || summaryKn) && (
+                  <div style={{ ...outputStyle, display: "flex", flexDirection: "column", gap: "16px" }}>
+                    {/* English Summary */}
+                    <div style={{ padding: "14px 16px", background: "#fbfbfe", borderRadius: "8px", border: "1px solid #e2def2" }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "8px" }}>
+                        <span style={{ fontSize: "11px", fontWeight: "700", textTransform: "uppercase", letterSpacing: "0.5px", color: "#554b8c" }}>
+                          🇬🇧 English Summary
+                        </span>
+                      </div>
+                      <p style={{ ...paragraphStyle, margin: 0, color: "#252238" }} lang="en">
+                        {voicePlaying && voiceSource === "summary" && voiceLang === "en-IN" && activeSentenceIndex !== null ? (
+                          getSentenceSegments(summaryEn || summary).map((seg, idx) => (
+                            <span
+                              key={idx}
+                              style={{
+                                background: idx === activeSentenceIndex ? "rgba(114, 92, 222, 0.22)" : "transparent",
+                                borderRadius: "4px",
+                                padding: idx === activeSentenceIndex ? "2px 4px" : "0",
+                                transition: "background 0.2s ease",
+                                fontWeight: idx === activeSentenceIndex ? "600" : "normal",
+                              }}
+                            >
+                              {seg}
+                            </span>
+                          ))
+                        ) : (
+                          summaryEn || summary || "English summary not available."
+                        )}
+                      </p>
+                    </div>
+
+                    {/* Kannada Summary */}
+                    <div style={{ padding: "14px 16px", background: "#fdfcfe", borderRadius: "8px", border: "1.5px solid #dcd7f2" }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "8px" }}>
+                        <span style={{ fontSize: "11px", fontWeight: "700", textTransform: "uppercase", letterSpacing: "0.5px", color: "#5945c5" }}>
+                          🇮🇳 ಕನ್ನಡ ಸಾರಾಂಶ
+                        </span>
+                      </div>
+                      <p style={{ ...paragraphStyle, margin: 0, color: "#252238", lineHeight: 1.85 }} lang="kn">
+                        {voicePlaying && voiceSource === "summary" && voiceLang === "kn-IN" && activeSentenceIndex !== null ? (
+                          getSentenceSegments(summaryKn || summary).map((seg, idx) => (
+                            <span
+                              key={idx}
+                              style={{
+                                background: idx === activeSentenceIndex ? "rgba(114, 92, 222, 0.22)" : "transparent",
+                                borderRadius: "4px",
+                                padding: idx === activeSentenceIndex ? "2px 4px" : "0",
+                                transition: "background 0.2s ease",
+                                fontWeight: idx === activeSentenceIndex ? "600" : "normal",
+                              }}
+                            >
+                              {seg}
+                            </span>
+                          ))
+                        ) : (
+                          summaryKn || summary || "ಕನ್ನಡ ಸಾರಾಂಶ ಲಭ್ಯವಿಲ್ಲ."
+                        )}
+                      </p>
+                    </div>
                   </div>
                 )}
               </section>
@@ -2235,29 +2282,65 @@ function App() {
                   <p role="status">Generating your summary...</p>
                 )}
 
-                {summary && (
-                  <div className="evidence-info" style={outputStyle}>
-                    <strong>Summary</strong>
-                    <p lang="kn" style={paragraphStyle}>
-                      {voicePlaying && voiceSource === "summary" && activeSentenceIndex !== null ? (
-                        getSentenceSegments(summary).map((seg, idx) => (
-                          <span
-                            key={idx}
-                            style={{
-                              background: idx === activeSentenceIndex ? "rgba(114, 92, 222, 0.22)" : "transparent",
-                              borderRadius: "4px",
-                              padding: idx === activeSentenceIndex ? "2px 4px" : "0",
-                              transition: "background 0.2s ease",
-                              fontWeight: idx === activeSentenceIndex ? "600" : "normal",
-                            }}
-                          >
-                            {seg}
-                          </span>
-                        ))
-                      ) : (
-                        summary
-                      )}
-                    </p>
+                {(summary || summaryEn || summaryKn) && (
+                  <div style={{ ...outputStyle, display: "flex", flexDirection: "column", gap: "16px" }}>
+                    {/* English Summary */}
+                    <div style={{ padding: "14px 16px", background: "#fbfbfe", borderRadius: "8px", border: "1px solid #e2def2" }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "8px" }}>
+                        <span style={{ fontSize: "11px", fontWeight: "700", textTransform: "uppercase", letterSpacing: "0.5px", color: "#554b8c" }}>
+                          🇬🇧 English Summary
+                        </span>
+                      </div>
+                      <p style={{ ...paragraphStyle, margin: 0, color: "#252238" }} lang="en">
+                        {voicePlaying && voiceSource === "summary" && voiceLang === "en-IN" && activeSentenceIndex !== null ? (
+                          getSentenceSegments(summaryEn || summary).map((seg, idx) => (
+                            <span
+                              key={idx}
+                              style={{
+                                background: idx === activeSentenceIndex ? "rgba(114, 92, 222, 0.22)" : "transparent",
+                                borderRadius: "4px",
+                                padding: idx === activeSentenceIndex ? "2px 4px" : "0",
+                                transition: "background 0.2s ease",
+                                fontWeight: idx === activeSentenceIndex ? "600" : "normal",
+                              }}
+                            >
+                              {seg}
+                            </span>
+                          ))
+                        ) : (
+                          summaryEn || summary || "English summary not available."
+                        )}
+                      </p>
+                    </div>
+
+                    {/* Kannada Summary */}
+                    <div style={{ padding: "14px 16px", background: "#fdfcfe", borderRadius: "8px", border: "1.5px solid #dcd7f2" }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "8px" }}>
+                        <span style={{ fontSize: "11px", fontWeight: "700", textTransform: "uppercase", letterSpacing: "0.5px", color: "#5945c5" }}>
+                          🇮🇳 ಕನ್ನಡ ಸಾರಾಂಶ
+                        </span>
+                      </div>
+                      <p style={{ ...paragraphStyle, margin: 0, color: "#252238", lineHeight: 1.85 }} lang="kn">
+                        {voicePlaying && voiceSource === "summary" && voiceLang === "kn-IN" && activeSentenceIndex !== null ? (
+                          getSentenceSegments(summaryKn || summary).map((seg, idx) => (
+                            <span
+                              key={idx}
+                              style={{
+                                background: idx === activeSentenceIndex ? "rgba(114, 92, 222, 0.22)" : "transparent",
+                                borderRadius: "4px",
+                                padding: idx === activeSentenceIndex ? "2px 4px" : "0",
+                                transition: "background 0.2s ease",
+                                fontWeight: idx === activeSentenceIndex ? "600" : "normal",
+                              }}
+                            >
+                              {seg}
+                            </span>
+                          ))
+                        ) : (
+                          summaryKn || summary || "ಕನ್ನಡ ಸಾರಾಂಶ ಲಭ್ಯವಿಲ್ಲ."
+                        )}
+                      </p>
+                    </div>
                   </div>
                 )}
               </section>

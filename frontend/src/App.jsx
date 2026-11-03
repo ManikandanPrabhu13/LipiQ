@@ -693,6 +693,9 @@ function App() {
     setSummaryLoading(true);
     setError("");
 
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 60000);
+
     try {
       const response = await fetch(`${API_BASE}/api/summarize`, {
         method: "POST",
@@ -703,7 +706,10 @@ function App() {
           text: activeDocText,
           language: targetLang,
         }),
+        signal: controller.signal,
       });
+
+      clearTimeout(timeoutId);
 
       const data = await readResponse(
         response,
@@ -726,7 +732,12 @@ function App() {
         return next;
       });
     } catch (err) {
-      setError(`Summary failed: ${err.message}`);
+      clearTimeout(timeoutId);
+      if (err.name === "AbortError") {
+        setError("Summary operation timed out after 60 seconds. Please try again.");
+      } else {
+        setError(`Summary failed: ${err.message}`);
+      }
     } finally {
       setSummaryLoading(false);
     }
@@ -752,6 +763,9 @@ function App() {
     setInsights(null);
     setError("");
 
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 60000);
+
     try {
       const response = await fetch(`${API_BASE}/api/insights`, {
         method: "POST",
@@ -764,7 +778,10 @@ function App() {
           image_width: result?.image_width || 1,
           image_height: result?.image_height || 1,
         }),
+        signal: controller.signal,
       });
+
+      clearTimeout(timeoutId);
 
       const data = await readResponse(
         response,
@@ -773,7 +790,12 @@ function App() {
 
       setInsights(data);
     } catch (err) {
-      setError(`Insights failed: ${err.message}`);
+      clearTimeout(timeoutId);
+      if (err.name === "AbortError") {
+        setError("Insights operation timed out after 60 seconds. Please try again.");
+      } else {
+        setError(`Insights failed: ${err.message}`);
+      }
     } finally {
       setInsightsLoading(false);
     }
@@ -801,6 +823,9 @@ function App() {
     setActivePassageIndex(null);
     setError("");
 
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 60000);
+
     try {
       const response = await fetch(`${API_BASE}/api/ask`, {
         method: "POST",
@@ -814,7 +839,10 @@ function App() {
           image_width: result?.image_width || 1,
           image_height: result?.image_height || 1,
         }),
+        signal: controller.signal,
       });
+
+      clearTimeout(timeoutId);
 
       const data = await readResponse(
         response,
@@ -833,7 +861,12 @@ function App() {
         highlightPassageEvidence(evidenceList[firstFoundIndex], firstFoundIndex);
       }
     } catch (err) {
-      setError(`Question failed: ${err.message}`);
+      clearTimeout(timeoutId);
+      if (err.name === "AbortError") {
+        setError("Question answering timed out after 60 seconds. Please try again.");
+      } else {
+        setError(`Question failed: ${err.message}`);
+      }
     } finally {
       setAnswerLoading(false);
     }
@@ -921,6 +954,9 @@ function App() {
     setCorrectionMessage("");
     setError("");
 
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 60000);
+
     try {
       const response = await fetch(`${API_BASE}/api/correct-ocr`, {
         method: "POST",
@@ -930,7 +966,10 @@ function App() {
           context: null,
           word_confidences: null,
         }),
+        signal: controller.signal,
       });
+
+      clearTimeout(timeoutId);
 
       const data = await readResponse(response, "Smart OCR correction failed.");
       const list = Array.isArray(data.corrections) ? data.corrections : [];
@@ -938,7 +977,12 @@ function App() {
       setCorrectionMessage(data.message || `${list.length} correction suggestions found.`);
       setCorrectedText(data.corrected_text || textToCorrect);
     } catch (err) {
-      setError(`Smart correction error: ${err.message}`);
+      clearTimeout(timeoutId);
+      if (err.name === "AbortError") {
+        setError("Smart OCR correction timed out after 60 seconds. Please try again.");
+      } else {
+        setError(`Smart correction error: ${err.message}`);
+      }
     } finally {
       setCorrectionLoading(false);
     }

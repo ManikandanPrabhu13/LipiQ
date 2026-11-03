@@ -383,8 +383,38 @@ def ai_status():
     }
 
 
+# Maximum time (seconds) we are willing to wait for any AI call.
+AI_TIMEOUT_SECONDS = 55
+
+# Shared executor for blocking AI calls so they don't block the event loop.
+_ai_executor = ThreadPoolExecutor(max_workers=4)
+
+
+async def _run_ai_async(user_prompt: str, max_tokens: int) -> dict:
+    """Run AI call in a thread with a hard 55-second timeout."""
+    loop = asyncio.get_running_loop()
+    try:
+        result = await asyncio.wait_for(
+            loop.run_in_executor(
+                _ai_executor,
+                lambda: generate_ai(AI_SYSTEM_PROMPT, user_prompt, max_tokens=max_tokens),
+            ),
+            timeout=AI_TIMEOUT_SECONDS,
+        )
+        return result
+    except asyncio.TimeoutError:
+        raise HTTPException(
+            status_code=504,
+            detail="AI operation timed out after 55 seconds. Please try again.",
+        )
+    except AIUnavailableError as error:
+        raise HTTPException(status_code=503, detail=str(error))
+    except AIRequestError as error:
+        raise HTTPException(status_code=502, detail=str(error))
+
+
 def _run_ai(user_prompt: str, max_tokens: int) -> dict:
-    """Call the configured AI provider and translate its errors."""
+    """Synchronous wrapper kept for any sync callers; prefer _run_ai_async."""
     try:
         return generate_ai(
             AI_SYSTEM_PROMPT,
@@ -472,9 +502,19 @@ SUPPORTED_SUMMARY_LANGUAGES = {
     },
 }
 
+# Maximum document characters sent to the AI to bound latency.
+MAX_AI_TEXT_CHARS = 8000
+
+def _truncate_text(text: str, limit: int = MAX_AI_TEXT_CHARS) -> str:
+    """Truncate document text to avoid oversized prompts."""
+    if len(text) <= limit:
+        return text
+    return text[:limit] + "\n\n[Document truncated for processing]"
+
+
 
 @app.post("/api/summarize")
-def summarize_document(request: DocumentTextRequest):
+async def summarize_document(request: DocumentTextRequest):
     """Summarize extracted text in a chosen language or both English and Kannada."""
     lang_code = (request.language or "").strip().lower()
 
@@ -491,9 +531,9 @@ def summarize_document(request: DocumentTextRequest):
             "3. Do not invent facts not present in the document.\n"
             "4. Respond directly with the summary text in the requested language and script (no preamble, no markdown JSON wrapper).\n\n"
             "DOCUMENT:\n<<<\n"
-            f"{request.text}\n>>>"
+            f"{_truncate_text(request.text)}\n>>>"
         )
-        result = _run_ai(prompt, max_tokens=650)
+        result = await _run_ai_async(prompt, max_tokens=650)
         summary_text = result["answer"].strip()
 
         return {
@@ -520,10 +560,10 @@ def summarize_document(request: DocumentTextRequest):
         "3. Base your summary solely on the DOCUMENT text.\n"
         "4. Respond with raw JSON only (no markdown code blocks, no preamble, no postscript).\n\n"
         "DOCUMENT:\n<<<\n"
-        f"{request.text}\n>>>"
+        f"{_truncate_text(request.text)}\n>>>"
     )
 
-    result = _run_ai(prompt, max_tokens=650)
+    result = await _run_ai_async(prompt, max_tokens=650)
     raw_answer = result["answer"].strip()
 
     # Strip markdown block wrappers if present
@@ -565,7 +605,7 @@ def summarize_document(request: DocumentTextRequest):
 
 
 @app.post("/api/ask")
-def ask_document(request: AskRequest):
+async def ask_document(request: AskRequest):
     """Answer a question using only the supplied extracted text with evidence passages."""
     user_prompt = (
         "Respond ONLY with a valid JSON object matching this schema:\n"
@@ -585,10 +625,10 @@ def ask_document(request: AskRequest):
         "5. Respond with raw JSON only (no markdown code blocks, no preamble, no postscript).\n\n"
         f"QUESTION: {request.question}\n\n"
         "DOCUMENT:\n<<<\n"
-        f"{request.text}\n>>>"
+        f"{_truncate_text(request.text)}\n>>>"
     )
 
-    result = _run_ai(user_prompt, max_tokens=600)
+    result = await _run_ai_async(user_prompt, max_tokens=600)
     raw_answer = result["answer"].strip()
 
     # Attempt to parse JSON response
@@ -773,7 +813,7 @@ def _parse_or_repair_json(text: str) -> dict:
 
 
 @app.post("/api/insights")
-def extract_insights(request: InsightsRequest):
+async def extract_insights(request: InsightsRequest):
     """Automatically extract structured, evidence-backed insights from the document."""
     user_prompt = (
         "Analyze the following document and extract structured key information.\n"
@@ -808,10 +848,10 @@ def extract_insights(request: InsightsRequest):
         "8. Preserve original Kannada wording where applicable. Do not translate source excerpts.\n"
         "9. Respond with raw JSON only (no markdown, no preamble, no code fences).\n\n"
         "DOCUMENT:\n<<<\n"
-        f"{request.text}\n>>>"
+        f"{_truncate_text(request.text)}\n>>>"
     )
 
-    result = _run_ai(user_prompt, max_tokens=650)
+    result = await _run_ai_async(user_prompt, max_tokens=650)
     raw_answer = result["answer"].strip()
 
     # Clean markdown block wrappers if present

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import "./App.css";
 
 const API_BASE = "http://127.0.0.1:8000";
@@ -72,6 +72,9 @@ function App() {
   const [voicePaused, setVoicePaused] = useState(false);
   const [voiceWarning, setVoiceWarning] = useState("");
   const [availableVoices, setAvailableVoices] = useState([]);
+  const [activeSentenceIndex, setActiveSentenceIndex] = useState(null);
+  const sentenceRangesRef = useRef([]);
+  const activeSentenceIndexRef = useRef(null);
 
   useEffect(() => {
     return () => {
@@ -140,10 +143,69 @@ function App() {
     }
     setVoicePlaying(false);
     setVoicePaused(false);
+    setActiveSentenceIndex(null);
+    activeSentenceIndexRef.current = null;
+    sentenceRangesRef.current = [];
   }
 
   function detectKannadaText(str) {
     return /[\u0C80-\u0CFF]/.test(str || "");
+  }
+
+  // Feature 2: Clean Markdown Before Speech
+  function cleanMarkdownForSpeech(md) {
+    if (!md) return "";
+    let text = md;
+    // Replace markdown links [label](url) with just label
+    text = text.replace(/\[([^\]]+)\]\([^)]+\)/g, "$1");
+    // Remove raw URLs so they are not read aloud
+    text = text.replace(/https?:\/\/\S+/g, "");
+    // Remove Markdown heading markers (e.g. ### Title -> Title)
+    text = text.replace(/^[ \t]*#+[ \t]+/gm, "");
+    // Convert bullets (*, -, •) to natural speech flow without speaking symbols
+    text = text.replace(/^[ \t]*[-*•][ \t]+/gm, "");
+    // Remove bold and italic markers (*, _, ~, `)
+    text = text.replace(/[*_~`]/g, "");
+    // Numbered lists: keep number and content cleanly (e.g. 1. Item -> 1. Item)
+    text = text.replace(/^[ \t]*(\d+)\.[ \t]+/gm, "$1. ");
+    return text.trim();
+  }
+
+  // Split text into coherent sentence segments for display and highlighting
+  function getSentenceSegments(text) {
+    if (!text) return [];
+    // Split on Kannada danda (। ॥), English punctuation (. ! ?), or newlines
+    const regex = /[^।॥.!?\r\n]+(?:[।॥.!?]+|\n+|$)/g;
+    const rawMatches = text.match(regex) || [];
+    const merged = [];
+    let buf = "";
+
+    for (const r of rawMatches) {
+      if (!r.trim()) {
+        if (merged.length > 0) {
+          merged[merged.length - 1] += r;
+        } else {
+          buf += r;
+        }
+        continue;
+      }
+      buf += r;
+      const clean = buf.trim();
+      // Keep together if it is just a short number or single token like '1.'
+      if (/^\d+\.?$/.test(clean) || clean.length <= 2) {
+        continue;
+      }
+      merged.push(buf);
+      buf = "";
+    }
+    if (buf) {
+      if (merged.length > 0) {
+        merged[merged.length - 1] += buf;
+      } else {
+        merged.push(buf);
+      }
+    }
+    return merged;
   }
 
   function handleVoicePlay() {
@@ -152,9 +214,9 @@ function App() {
       return;
     }
 
-    // Determine target text
-    const targetText = voiceSource === "summary" ? summary.trim() : editedText.trim();
-    if (!targetText) {
+    // Determine target raw text
+    const rawText = voiceSource === "summary" ? summary.trim() : editedText.trim();
+    if (!rawText) {
       setVoiceWarning(
         voiceSource === "summary"
           ? "No AI summary available to read. Generate a summary first."
@@ -173,14 +235,47 @@ function App() {
 
     // Cancel any previous utterance
     window.speechSynthesis.cancel();
+    setActiveSentenceIndex(null);
+    activeSentenceIndexRef.current = null;
 
     // Check script/language alignment
-    const containsKannada = detectKannadaText(targetText);
+    const containsKannada = detectKannadaText(rawText);
     let warningMsg = "";
     if (voiceLang === "kn-IN" && !containsKannada) {
       warningMsg = "Document contains non-Kannada text. Kannada voice pronunciation may sound unusual.";
     } else if (voiceLang === "en-IN" && containsKannada) {
       warningMsg = "Document contains Kannada text. English voice pronunciation may sound incorrect.";
+    }
+
+    // Build sentence segments and speech text
+    const segments = getSentenceSegments(rawText);
+    const speechUnits = [];
+    let currentSpeechPos = 0;
+
+    for (let i = 0; i < segments.length; i++) {
+      const segRaw = segments[i];
+      const spokenPart = voiceSource === "summary" ? cleanMarkdownForSpeech(segRaw) : segRaw;
+      const spokenTrimmed = spokenPart.trim() || segRaw.trim();
+      const start = currentSpeechPos;
+      const end = start + spokenTrimmed.length;
+      speechUnits.push({
+        index: i,
+        raw: segRaw,
+        spoken: spokenTrimmed,
+        start,
+        end,
+      });
+      // Separate spoken sentences with a space/period pause
+      currentSpeechPos = end + 2;
+    }
+
+    sentenceRangesRef.current = speechUnits;
+
+    // Build exact text passed to SpeechSynthesis
+    const targetText = speechUnits.map((u) => u.spoken).join(". ");
+    if (!targetText.trim()) {
+      setVoiceWarning("No readable text found for playback.");
+      return;
     }
 
     // Find best voice match
@@ -198,7 +293,6 @@ function App() {
     }
 
     if (!selectedVoice) {
-      // Check if fallback voice exists
       selectedVoice = voices.find((v) => v.lang.toLowerCase().startsWith(voiceLang.slice(0, 2)));
     }
 
@@ -220,20 +314,47 @@ function App() {
       utterance.voice = selectedVoice;
     }
 
+    // Highlighting sync via onboundary events
+    utterance.onboundary = (event) => {
+      if (event.name === "sentence" || event.name === "word") {
+        const charIdx = event.charIndex;
+        const units = sentenceRangesRef.current;
+        for (let i = 0; i < units.length; i++) {
+          const u = units[i];
+          if (charIdx >= u.start && charIdx <= u.end + 2) {
+            if (activeSentenceIndexRef.current !== u.index) {
+              activeSentenceIndexRef.current = u.index;
+              setActiveSentenceIndex(u.index);
+            }
+            break;
+          }
+        }
+      }
+    };
+
     utterance.onstart = () => {
       setVoicePlaying(true);
       setVoicePaused(false);
+      // Start highlight on the first sentence
+      if (speechUnits.length > 0) {
+        activeSentenceIndexRef.current = 0;
+        setActiveSentenceIndex(0);
+      }
     };
 
     utterance.onend = () => {
       setVoicePlaying(false);
       setVoicePaused(false);
+      setActiveSentenceIndex(null);
+      activeSentenceIndexRef.current = null;
     };
 
     utterance.onerror = (e) => {
       console.warn("SpeechSynthesis error:", e);
       setVoicePlaying(false);
       setVoicePaused(false);
+      setActiveSentenceIndex(null);
+      activeSentenceIndexRef.current = null;
       if (e.error !== "canceled" && e.error !== "interrupted") {
         setVoiceWarning(`Speech playback error: ${e.error}`);
       }
@@ -1175,7 +1296,24 @@ function App() {
                   <div style={outputStyle}>
                     <h4 style={{ marginBottom: "8px" }}>Summary</h4>
                     <p style={paragraphStyle} lang="kn">
-                      {summary}
+                      {voicePlaying && voiceSource === "summary" && activeSentenceIndex !== null ? (
+                        getSentenceSegments(summary).map((seg, idx) => (
+                          <span
+                            key={idx}
+                            style={{
+                              background: idx === activeSentenceIndex ? "rgba(114, 92, 222, 0.22)" : "transparent",
+                              borderRadius: "4px",
+                              padding: idx === activeSentenceIndex ? "2px 4px" : "0",
+                              transition: "background 0.2s ease",
+                              fontWeight: idx === activeSentenceIndex ? "600" : "normal",
+                            }}
+                          >
+                            {seg}
+                          </span>
+                        ))
+                      ) : (
+                        summary
+                      )}
                     </p>
                   </div>
                 )}
@@ -1454,6 +1592,58 @@ function App() {
                     </span>
                   )}
                 </div>
+
+                {/* Read-Along Currently Reading Cue */}
+                {(voicePlaying || voicePaused) && activeSentenceIndex !== null && (
+                  <div
+                    style={{
+                      marginTop: "16px",
+                      padding: "12px 16px",
+                      background: "#f4f1fa",
+                      borderRadius: "8px",
+                      border: "1px solid #dcd7f2",
+                    }}
+                  >
+                    <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "6px" }}>
+                      <span
+                        style={{
+                          width: "8px",
+                          height: "8px",
+                          borderRadius: "50%",
+                          background: voicePaused ? "#f59e0b" : "#725cde",
+                          display: "inline-block",
+                        }}
+                      />
+                      <span style={{ fontSize: "11px", fontWeight: "700", textTransform: "uppercase", letterSpacing: "0.5px", color: "#554b8c" }}>
+                        Currently reading {voiceSource === "summary" ? "(AI Summary)" : "(Full Document)"}:
+                      </span>
+                    </div>
+                    <p
+                      lang="kn"
+                      style={{
+                        margin: 0,
+                        fontSize: "13px",
+                        lineHeight: 1.6,
+                        color: "#252238",
+                      }}
+                    >
+                      {getSentenceSegments(voiceSource === "summary" ? summary : editedText).map((seg, idx) => (
+                        <span
+                          key={idx}
+                          style={{
+                            background: idx === activeSentenceIndex ? "rgba(114, 92, 222, 0.22)" : "transparent",
+                            borderRadius: "4px",
+                            padding: idx === activeSentenceIndex ? "2px 4px" : "0",
+                            transition: "background 0.2s ease",
+                            fontWeight: idx === activeSentenceIndex ? "600" : "normal",
+                          }}
+                        >
+                          {seg}
+                        </span>
+                      ))}
+                    </p>
+                  </div>
+                )}
 
                 {/* Warning message */}
                 {voiceWarning && (
@@ -2006,7 +2196,24 @@ function App() {
                   <div className="evidence-info" style={outputStyle}>
                     <strong>Summary</strong>
                     <p lang="kn" style={paragraphStyle}>
-                      {summary}
+                      {voicePlaying && voiceSource === "summary" && activeSentenceIndex !== null ? (
+                        getSentenceSegments(summary).map((seg, idx) => (
+                          <span
+                            key={idx}
+                            style={{
+                              background: idx === activeSentenceIndex ? "rgba(114, 92, 222, 0.22)" : "transparent",
+                              borderRadius: "4px",
+                              padding: idx === activeSentenceIndex ? "2px 4px" : "0",
+                              transition: "background 0.2s ease",
+                              fontWeight: idx === activeSentenceIndex ? "600" : "normal",
+                            }}
+                          >
+                            {seg}
+                          </span>
+                        ))
+                      ) : (
+                        summary
+                      )}
                     </p>
                   </div>
                 )}
@@ -2549,6 +2756,58 @@ function App() {
                     </span>
                   )}
                 </div>
+
+                {/* Read-Along Currently Reading Cue */}
+                {(voicePlaying || voicePaused) && activeSentenceIndex !== null && (
+                  <div
+                    style={{
+                      marginTop: "16px",
+                      padding: "12px 16px",
+                      background: "#f4f1fa",
+                      borderRadius: "8px",
+                      border: "1px solid #dcd7f2",
+                    }}
+                  >
+                    <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "6px" }}>
+                      <span
+                        style={{
+                          width: "8px",
+                          height: "8px",
+                          borderRadius: "50%",
+                          background: voicePaused ? "#f59e0b" : "#725cde",
+                          display: "inline-block",
+                        }}
+                      />
+                      <span style={{ fontSize: "11px", fontWeight: "700", textTransform: "uppercase", letterSpacing: "0.5px", color: "#554b8c" }}>
+                        Currently reading {voiceSource === "summary" ? "(AI Summary)" : "(Full Document)"}:
+                      </span>
+                    </div>
+                    <p
+                      lang="kn"
+                      style={{
+                        margin: 0,
+                        fontSize: "13px",
+                        lineHeight: 1.6,
+                        color: "#252238",
+                      }}
+                    >
+                      {getSentenceSegments(voiceSource === "summary" ? summary : editedText).map((seg, idx) => (
+                        <span
+                          key={idx}
+                          style={{
+                            background: idx === activeSentenceIndex ? "rgba(114, 92, 222, 0.22)" : "transparent",
+                            borderRadius: "4px",
+                            padding: idx === activeSentenceIndex ? "2px 4px" : "0",
+                            transition: "background 0.2s ease",
+                            fontWeight: idx === activeSentenceIndex ? "600" : "normal",
+                          }}
+                        >
+                          {seg}
+                        </span>
+                      ))}
+                    </p>
+                  </div>
+                )}
 
                 {/* Warning message */}
                 {voiceWarning && (

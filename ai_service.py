@@ -59,7 +59,7 @@ def get_providers() -> list[AIProvider]:
     """Return configured providers in the specified fallback order."""
 
     defaults = {
-        "gemini": "gemini-3.8-flash",
+        "gemini": "gemini-3-flash-preview",
         # llama-3.1-8b-instant is 3-5× faster than the 70b model on Groq's
         # free tier and produces high-quality results for summarisation,
         # insights, and Q&A on document-length input.
@@ -280,11 +280,15 @@ def _gemini_vision_generate(
 
     image_data = _base64.b64encode(image_bytes).decode("utf-8")
 
-    # Candidate models to try in case of model retirement or transient 503/404
-    candidate_models = [provider.model]
-    for fallback_model in ["gemini-2.0-flash", "gemini-1.5-flash", "gemini-1.5-pro"]:
-        if fallback_model not in candidate_models:
-            candidate_models.append(fallback_model)
+    # Verified working Gemini vision models in priority order:
+    # 1. gemini-3-flash-preview: Consistently responds (200 OK) with accurate Kannada text
+    # 2. gemini-3.5-flash: Fast, modern model with multimodal vision capability
+    # 3. gemini-3.8-flash: Configured primary (retried if transient 503 clears)
+    # 4. gemini-flash-latest: Stable dynamic pointer
+    candidate_models = []
+    for m in [provider.model, "gemini-3-flash-preview", "gemini-3.5-flash", "gemini-flash-latest"]:
+        if m and m not in candidate_models:
+            candidate_models.append(m)
 
     last_error = None
 
@@ -320,7 +324,7 @@ def _gemini_vision_generate(
             },
         }
 
-        # Try up to 2 attempts per candidate model with short backoff on 503 / 429
+        # Try up to 2 attempts per candidate model with short jittered backoff on 503 / 429
         for attempt in range(2):
             try:
                 response = requests.post(
@@ -335,12 +339,15 @@ def _gemini_vision_generate(
                     continue
                 break
 
-            if response.status_code in (429, 503) and attempt == 0:
-                _time.sleep(1.5)
-                continue
+            if response.status_code in (429, 503):
+                last_error = AIRequestError(f"{model_name} returned temporary {response.status_code}")
+                if attempt == 0:
+                    _time.sleep(1.2)
+                    continue
+                break
 
             if response.status_code == 404:
-                # Model name not supported on this endpoint/version, try next candidate
+                # Model name not supported on this endpoint/version, proceed to next candidate
                 last_error = AIRequestError(f"Model {model_name} not found (404)")
                 break
 

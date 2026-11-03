@@ -159,11 +159,13 @@ def _execute_tesseract_ocr(content: bytes, psm: int) -> tuple[dict, int, int]:
     # - -c tessedit_do_invert=0: Skip light-on-dark polarity check (~1.4x speedup)
     # - -c textord_parallel_baselines=1: Parallel baseline estimation
     # - -c textord_fast_pitch_test=1: Fast pitch detection
+    # - -c preserve_interword_spaces=1: Faster token boundary separation without regex passes
     ocr_config = (
         f"--oem 1 --psm {psm} "
         "-c tessedit_do_invert=0 "
         "-c textord_parallel_baselines=1 "
-        "-c textord_fast_pitch_test=1"
+        "-c textord_fast_pitch_test=1 "
+        "-c preserve_interword_spaces=1"
     )
 
     try:

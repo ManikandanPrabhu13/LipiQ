@@ -69,6 +69,8 @@ function App() {
   const [summaryLang, setSummaryLang] = useState("kn");
   const [summariesByLang, setSummariesByLang] = useState({});
   const [summaryLoading, setSummaryLoading] = useState(false);
+  const [syncedText, setSyncedText] = useState("");
+  const [syncStatus, setSyncStatus] = useState(""); // "" | "synced" | "outdated"
   const [question, setQuestion] = useState("");
   const [answer, setAnswer] = useState("");
   const [isSupported, setIsSupported] = useState(null);
@@ -248,7 +250,7 @@ function App() {
 
     // Determine target raw text
     const activeSummaryText = (summariesByLang[summaryLang]?.summary) || summary || summaryKn || summaryEn;
-    const rawText = voiceSource === "summary" ? activeSummaryText.trim() : editedText.trim();
+    const rawText = voiceSource === "summary" ? activeSummaryText.trim() : (syncedText || editedText).trim();
     if (!rawText) {
       setVoiceWarning(
         voiceSource === "summary"
@@ -334,7 +336,7 @@ function App() {
     if (!selectedVoice) {
       const displayName = targetVoiceConfig ? `${targetVoiceConfig.name} (${targetVoiceConfig.code})` : voiceLang;
       setVoiceWarning(
-        `No compatible ${displayName} speech voice was found on your browser or device. You may need to install a ${displayName} language pack in your OS speech settings.`
+        `No compatible voice is available for this language on your current device. You may need to install a ${displayName} language pack in your OS speech settings.`
       );
       return;
     } else if (warningMsg) {
@@ -443,6 +445,8 @@ function App() {
     setSummaryEn("");
     setSummaryKn("");
     setSummariesByLang({});
+    setSyncedText("");
+    setSyncStatus("");
     setQuestion("");
     setAnswer("");
     setIsSupported(null);
@@ -521,9 +525,10 @@ function App() {
       setResult(data);
       // Use extracted_text which preserves paragraph/line breaks from the
       // OCR layout. Fall back to the flat word list if the field is absent.
-      setEditedText(
-        data.extracted_text || (data.words || []).map((word) => word.text).join(" ")
-      );
+      const initialExtracted = data.extracted_text || (data.words || []).map((word) => word.text).join(" ");
+      setEditedText(initialExtracted);
+      setSyncedText(initialExtracted);
+      setSyncStatus("synced");
     } catch (err) {
       setError(
         err.message.toLowerCase().includes("fetch")
@@ -630,9 +635,49 @@ function App() {
     window.setTimeout(() => URL.revokeObjectURL(url), 1000);
   }
 
+  function handleTextChange(newVal) {
+    setEditedText(newVal);
+    if (handwritingMode) {
+      setHandwrittenText(newVal);
+    }
+    // Invalidate stale summaries and mark sync as outdated
+    setSyncStatus("outdated");
+    setSummariesByLang({});
+    setSummary("");
+    setSummaryEn("");
+    setSummaryKn("");
+    setAnswer("");
+    setInsights(null);
+  }
+
+  function handleSyncToAIFeatures() {
+    const textToSync = editedText.trim() || (handwritingMode ? handwrittenText.trim() : "");
+    if (!textToSync) {
+      setError("Cannot sync empty text to AI features.");
+      return;
+    }
+
+    setSyncedText(textToSync);
+    setEditedText(textToSync);
+    if (handwritingMode) {
+      setHandwrittenText(textToSync);
+    }
+    setSyncStatus("synced");
+    setError("");
+
+    // Clear stale outputs so AI features will regenerate from the freshly synced text
+    setSummariesByLang({});
+    setSummary("");
+    setSummaryEn("");
+    setSummaryKn("");
+    setAnswer("");
+    setInsights(null);
+  }
+
   async function generateSummary(requestedLang) {
+    const activeDocText = (syncedText || editedText).trim();
     const targetLang = typeof requestedLang === "string" ? requestedLang : summaryLang;
-    if (!editedText.trim()) {
+    if (!activeDocText) {
       setError("Extract or enter some text before summarizing.");
       return;
     }
@@ -655,7 +700,7 @@ function App() {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          text: editedText,
+          text: activeDocText,
           language: targetLang,
         }),
       });
@@ -697,7 +742,8 @@ function App() {
   }
 
   async function generateInsights() {
-    if (!editedText.trim()) {
+    const activeDocText = (syncedText || editedText).trim();
+    if (!activeDocText) {
       setError("Extract or enter some text before generating insights.");
       return;
     }
@@ -713,7 +759,7 @@ function App() {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          text: editedText,
+          text: activeDocText,
           words: result?.words || [],
           image_width: result?.image_width || 1,
           image_height: result?.image_height || 1,
@@ -736,7 +782,8 @@ function App() {
   async function askQuestion(event) {
     event?.preventDefault();
 
-    if (!editedText.trim()) {
+    const activeDocText = (syncedText || editedText).trim();
+    if (!activeDocText) {
       setError("Extract or enter some text before asking a question.");
       return;
     }
@@ -761,7 +808,7 @@ function App() {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          text: editedText,
+          text: activeDocText,
           question: question.trim(),
           words: result?.words || [],
           image_width: result?.image_width || 1,
@@ -950,8 +997,14 @@ function App() {
   function applyCorrectionsToEditor() {
     if (!correctedText.trim()) return;
     setEditedText(correctedText);
+    setSyncedText(correctedText.trim());
+    setSyncStatus("synced");
+    setSummariesByLang({});
     setSummary("");
+    setSummaryEn("");
+    setSummaryKn("");
     setAnswer("");
+    setInsights(null);
   }
 
   // Handwriting actions
@@ -993,8 +1046,10 @@ function App() {
       setHandwritingResult(data);
       const text = data.transcribed_text || "";
       setHandwrittenText(text);
-      // Automatically initialize editedText so AI features immediately work
+      // Automatically initialize editedText and syncedText so AI features immediately work
       setEditedText(text);
+      setSyncedText(text);
+      setSyncStatus("synced");
       setSummary("");
       setAnswer("");
       setInsights(null);
@@ -1036,12 +1091,7 @@ function App() {
   }
 
   function applyHandwritingToEditor() {
-    const textToApply = handwrittenText.trim() || editedText.trim();
-    if (!textToApply) return;
-    setEditedText(textToApply);
-    setSummary("");
-    setAnswer("");
-    setInsights(null);
+    handleSyncToAIFeatures();
   }
 
   return (
@@ -1332,12 +1382,7 @@ function App() {
                   lang="kn"
                   aria-label="Editable handwritten Kannada text"
                   value={editedText}
-                  onChange={(event) => {
-                    setEditedText(event.target.value);
-                    setHandwrittenText(event.target.value);
-                    setSummary("");
-                    setAnswer("");
-                  }}
+                  onChange={(event) => handleTextChange(event.target.value)}
                   rows={9}
                   placeholder="Transcribed Kannada text will appear here..."
                   style={textAreaStyle}
@@ -1365,13 +1410,24 @@ function App() {
                   <button
                     type="button"
                     className="primary-button"
-                    onClick={applyHandwritingToEditor}
+                    onClick={handleSyncToAIFeatures}
                     disabled={!editedText.trim()}
                     style={{ background: "#483d8b" }}
                   >
                     Sync to AI features
                   </button>
                 </div>
+
+                {syncStatus === "synced" && (
+                  <p role="status" style={{ fontSize: "12px", color: "#25825b", marginTop: "10px", fontWeight: "600", display: "flex", alignItems: "center", gap: "6px" }}>
+                    <span>✓</span> Transcription synced with AI features.
+                  </p>
+                )}
+                {syncStatus === "outdated" && (
+                  <p role="status" style={{ fontSize: "12px", color: "#b45309", marginTop: "10px", display: "flex", alignItems: "center", gap: "6px" }}>
+                    <span>⚠️</span> Edits pending. Click "Sync to AI features" to update summaries, insights, and Q&A.
+                  </p>
+                )}
               </section>
 
               {/* AI summary for handwriting */}
@@ -1821,6 +1877,10 @@ function App() {
                   )}
                 </div>
 
+                <p style={{ margin: "10px 0 0 0", fontSize: "11px", color: "#8a8799", fontStyle: "italic" }}>
+                  ℹ️ Voice availability depends on your browser and installed system voices.
+                </p>
+
                 {/* Read-Along Currently Reading Cue */}
                 {(voicePlaying || voicePaused) && activeSentenceIndex !== null && (
                   <div
@@ -2080,11 +2140,7 @@ function App() {
                   lang="kn"
                   aria-label="Editable extracted Kannada text"
                   value={editedText}
-                  onChange={(event) => {
-                    setEditedText(event.target.value);
-                    setSummary("");
-                    setAnswer("");
-                  }}
+                  onChange={(event) => handleTextChange(event.target.value)}
                   rows={9}
                   placeholder="Extracted Kannada text will appear here..."
                   style={textAreaStyle}
@@ -2108,7 +2164,28 @@ function App() {
                   >
                     Download .txt ↗
                   </button>
+
+                  <button
+                    type="button"
+                    className="primary-button"
+                    onClick={handleSyncToAIFeatures}
+                    disabled={!editedText.trim()}
+                    style={{ background: "#483d8b" }}
+                  >
+                    Sync to AI features
+                  </button>
                 </div>
+
+                {syncStatus === "synced" && (
+                  <p role="status" style={{ fontSize: "12px", color: "#25825b", marginTop: "10px", fontWeight: "600", display: "flex", alignItems: "center", gap: "6px" }}>
+                    <span>✓</span> Transcription synced with AI features.
+                  </p>
+                )}
+                {syncStatus === "outdated" && (
+                  <p role="status" style={{ fontSize: "12px", color: "#b45309", marginTop: "10px", display: "flex", alignItems: "center", gap: "6px" }}>
+                    <span>⚠️</span> Edits pending. Click "Sync to AI features" to update summaries, insights, and Q&A.
+                  </p>
+                )}
               </section>
 
               {/* Smart OCR Correction */}
@@ -3098,6 +3175,10 @@ function App() {
                     </span>
                   )}
                 </div>
+
+                <p style={{ margin: "10px 0 0 0", fontSize: "11px", color: "#8a8799", fontStyle: "italic" }}>
+                  ℹ️ Voice availability depends on your browser and installed system voices.
+                </p>
 
                 {/* Read-Along Currently Reading Cue */}
                 {(voicePlaying || voicePaused) && activeSentenceIndex !== null && (

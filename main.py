@@ -74,6 +74,7 @@ class EvidenceRequest(BaseModel):
 
 class DocumentTextRequest(BaseModel):
     text: str = Field(min_length=1, max_length=60000)
+    language: str | None = Field(default=None, max_length=10)
 
 
 class InsightsRequest(DocumentTextRequest):
@@ -396,9 +397,117 @@ def _run_ai(user_prompt: str, max_tokens: int) -> dict:
         raise HTTPException(status_code=502, detail=str(error))
 
 
+SUPPORTED_SUMMARY_LANGUAGES = {
+    "en": {
+        "name": "English",
+        "native": "English",
+        "script": "Latin script",
+        "instructions": "Write fluent, natural English.",
+        "rtl": False,
+    },
+    "kn": {
+        "name": "Kannada",
+        "native": "ಕನ್ನಡ",
+        "script": "ಕನ್ನಡ ಲಿಪಿ (Kannada script)",
+        "instructions": "Write genuinely in authentic Kannada script. Do not transliterate English.",
+        "rtl": False,
+    },
+    "ta": {
+        "name": "Tamil",
+        "native": "தமிழ்",
+        "script": "தமிழ் எழுத்து (Tamil script)",
+        "instructions": "Write genuinely in authentic Tamil script with natural vocabulary.",
+        "rtl": False,
+    },
+    "te": {
+        "name": "Telugu",
+        "native": "తెలుగు",
+        "script": "తెలుగు లిಪಿ (Telugu script)",
+        "instructions": "Write genuinely in authentic Telugu script with natural vocabulary.",
+        "rtl": False,
+    },
+    "ml": {
+        "name": "Malayalam",
+        "native": "മലയാളം",
+        "script": "മലയാള ലിപി (Malayalam script)",
+        "instructions": "Write genuinely in authentic Malayalam script with natural vocabulary.",
+        "rtl": False,
+    },
+    "tcy": {
+        "name": "Tulu",
+        "native": "ತುಳು",
+        "script": "ಕನ್ನಡ ಲಿಪಿ (Kannada script)",
+        "instructions": "Tulu is a distinct Dravidian language, not Kannada. Write in Kannada script using authentic Tulu vocabulary and grammar (e.g., ತುಳುನಾಡ್, ಆಂಡ್, ಉಂಡು, ಬರ್ಪುಂಡು). Do NOT output standard Kannada text.",
+        "rtl": False,
+        "experimental": True,
+    },
+    "mr": {
+        "name": "Marathi",
+        "native": "मराठी",
+        "script": "देवनागरी ಲಿಪಿ (Devanagari script)",
+        "instructions": "Write genuinely in authentic Marathi using Devanagari script.",
+        "rtl": False,
+    },
+    "hi": {
+        "name": "Hindi",
+        "native": "हिन्दी",
+        "script": "देवनागरी ಲಿಪಿ (Devanagari script)",
+        "instructions": "Write genuinely in authentic Hindi using Devanagari script.",
+        "rtl": False,
+    },
+    "ur": {
+        "name": "Urdu",
+        "native": "اردو",
+        "script": "اردو رسم الخط (Urdu Nastaliq / Perso-Arabic script)",
+        "instructions": "Write genuinely in authentic Urdu using Urdu Nastaliq/Perso-Arabic script.",
+        "rtl": True,
+    },
+    "gom": {
+        "name": "Konkani",
+        "native": "कोंकणी",
+        "script": "देवनागरी ಲಿಪಿ (Devanagari script)",
+        "instructions": "Konkani is a distinct language, not Marathi. Write in Devanagari script using authentic Goan/Konkani vocabulary and grammar (e.g., ಆಸಾ, ಜಾಲೊ, ಕರ್ತಾ). Do NOT output standard Marathi text.",
+        "rtl": False,
+        "experimental": True,
+    },
+}
+
+
 @app.post("/api/summarize")
 def summarize_document(request: DocumentTextRequest):
-    """Summarize extracted text in both English and genuine Kannada script."""
+    """Summarize extracted text in a chosen language or both English and Kannada."""
+    lang_code = (request.language or "").strip().lower()
+
+    # Case 1: Specific language requested (from the 10 supported)
+    if lang_code and lang_code in SUPPORTED_SUMMARY_LANGUAGES:
+        lang_info = SUPPORTED_SUMMARY_LANGUAGES[lang_code]
+        prompt = (
+            f"Summarize the following document into {lang_info['name']} ({lang_info['native']}).\n"
+            f"Script requirement: {lang_info['script']}\n"
+            f"Guidelines: {lang_info['instructions']}\n\n"
+            "Rules:\n"
+            f"1. Provide a concise 2-4 sentence summary followed by 2-3 bullet points of key takeaways in {lang_info['name']}.\n"
+            "2. Preserve all facts, names, dates, numbers, and technical terms accurately.\n"
+            "3. Do not invent facts not present in the document.\n"
+            "4. Respond directly with the summary text in the requested language and script (no preamble, no markdown JSON wrapper).\n\n"
+            "DOCUMENT:\n<<<\n"
+            f"{request.text}\n>>>"
+        )
+        result = _run_ai(prompt, max_tokens=650)
+        summary_text = result["answer"].strip()
+
+        return {
+            "summary": summary_text,
+            "language": lang_code,
+            "language_name": lang_info["name"],
+            "native_name": lang_info["native"],
+            "rtl": lang_info.get("rtl", False),
+            "experimental": lang_info.get("experimental", False),
+            "provider": result["provider"],
+            "model": result["model"],
+        }
+
+    # Case 2: Default dual English + Kannada summary (backwards compatible)
     prompt = (
         "Respond ONLY with a valid JSON object matching this schema:\n"
         "{\n"
@@ -449,6 +558,7 @@ def summarize_document(request: DocumentTextRequest):
         "summary": unified_summary,
         "summary_en": summary_en,
         "summary_kn": summary_kn,
+        "language": "kn",
         "provider": result["provider"],
         "model": result["model"],
     }

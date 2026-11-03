@@ -23,6 +23,32 @@ async function readResponse(response, fallbackMessage) {
   return data;
 }
 
+export const SUMMARY_LANGUAGES = [
+  { code: "kn", name: "Kannada", native: "ಕನ್ನಡ – Kannada", script: "Kannada", rtl: false },
+  { code: "en", name: "English", native: "English", script: "Latin", rtl: false },
+  { code: "ta", name: "Tamil", native: "தமிழ் – Tamil", script: "Tamil", rtl: false },
+  { code: "te", name: "Telugu", native: "తెలుగు – Telugu", script: "Telugu", rtl: false },
+  { code: "ml", name: "Malayalam", native: "മലയാളം – Malayalam", script: "Malayalam", rtl: false },
+  { code: "tcy", name: "Tulu", native: "ತುಳು – Tulu", script: "Kannada", rtl: false, experimental: true },
+  { code: "mr", name: "Marathi", native: "मराठी – Marathi", script: "Devanagari", rtl: false },
+  { code: "hi", name: "Hindi", native: "हिन्दी – Hindi", script: "Devanagari", rtl: false },
+  { code: "ur", name: "Urdu", native: "اردو – Urdu", script: "Nastaliq", rtl: true },
+  { code: "gom", name: "Konkani", native: "कोंकणी – Konkani", script: "Devanagari", rtl: false, experimental: true },
+];
+
+export const VOICE_LANGUAGES = [
+  { code: "kn-IN", langPrefix: "kn", name: "Kannada", native: "ಕನ್ನಡ", keywords: ["kannada", "kn"] },
+  { code: "en-IN", langPrefix: "en", name: "English", native: "English", keywords: ["english", "en-in", "en"] },
+  { code: "ta-IN", langPrefix: "ta", name: "Tamil", native: "தமிழ்", keywords: ["tamil", "ta"] },
+  { code: "te-IN", langPrefix: "te", name: "Telugu", native: "తెలుగు", keywords: ["telugu", "te"] },
+  { code: "ml-IN", langPrefix: "ml", name: "Malayalam", native: "മലയാളം", keywords: ["malayalam", "ml"] },
+  { code: "mr-IN", langPrefix: "mr", name: "Marathi", native: "मराठी", keywords: ["marathi", "mr"] },
+  { code: "hi-IN", langPrefix: "hi", name: "Hindi", native: "हिन्दी", keywords: ["hindi", "hi"] },
+  { code: "ur-IN", langPrefix: "ur", name: "Urdu", native: "اردو", keywords: ["urdu", "ur"] },
+  { code: "tcy-IN", langPrefix: "tcy", name: "Tulu", native: "ತುಳು", keywords: ["tulu", "tcy"], noDirectVoice: true },
+  { code: "kok-IN", langPrefix: "kok", name: "Konkani", native: "कोंकणी", keywords: ["konkani", "kok", "gom"], noDirectVoice: true },
+];
+
 function App() {
   const [file, setFile] = useState(null);
   const [preview, setPreview] = useState("");
@@ -40,6 +66,8 @@ function App() {
   const [summary, setSummary] = useState("");
   const [summaryEn, setSummaryEn] = useState("");
   const [summaryKn, setSummaryKn] = useState("");
+  const [summaryLang, setSummaryLang] = useState("kn");
+  const [summariesByLang, setSummariesByLang] = useState({});
   const [summaryLoading, setSummaryLoading] = useState(false);
   const [question, setQuestion] = useState("");
   const [answer, setAnswer] = useState("");
@@ -219,7 +247,8 @@ function App() {
     }
 
     // Determine target raw text
-    const rawText = voiceSource === "summary" ? ((voiceLang === "kn-IN" ? (summaryKn || summary) : (summaryEn || summary))).trim() : editedText.trim();
+    const activeSummaryText = (summariesByLang[summaryLang]?.summary) || summary || summaryKn || summaryEn;
+    const rawText = voiceSource === "summary" ? activeSummaryText.trim() : editedText.trim();
     if (!rawText) {
       setVoiceWarning(
         voiceSource === "summary"
@@ -284,27 +313,30 @@ function App() {
 
     // Find best voice match
     const voices = availableVoices.length > 0 ? availableVoices : (window.speechSynthesis.getVoices() || []);
+    const targetVoiceConfig = VOICE_LANGUAGES.find((vl) => vl.code === voiceLang);
     let selectedVoice = null;
 
-    if (voiceLang === "kn-IN") {
-      selectedVoice = voices.find(
-        (v) => v.lang.toLowerCase().startsWith("kn") || v.name.toLowerCase().includes("kannada")
-      );
-    } else if (voiceLang === "en-IN") {
-      selectedVoice = voices.find((v) => v.lang.toLowerCase().replace("_", "-") === "en-in") ||
-        voices.find((v) => v.lang.toLowerCase().startsWith("en-")) ||
-        voices.find((v) => v.lang.toLowerCase().startsWith("en"));
-    }
-
-    if (!selectedVoice) {
-      selectedVoice = voices.find((v) => v.lang.toLowerCase().startsWith(voiceLang.slice(0, 2)));
-    }
-
-    if (!selectedVoice) {
-      const langName = voiceLang === "kn-IN" ? "Kannada (kn-IN)" : "English (en-IN)";
+    if (targetVoiceConfig?.noDirectVoice) {
       setVoiceWarning(
-        `No dedicated ${langName} voice found in your browser/OS. Speech may use default voice or fail to pronounce properly.`
+        `No compatible speech synthesizer voice exists in standard operating systems for ${targetVoiceConfig.name} (${targetVoiceConfig.native}). LipiQ does not substitute unrelated voices to preserve authenticity.`
       );
+      return;
+    }
+
+    if (targetVoiceConfig) {
+      const prefix = targetVoiceConfig.langPrefix.toLowerCase();
+      // Try exact code match, e.g. 'ta-in'
+      selectedVoice = voices.find((v) => v.lang.toLowerCase().replace("_", "-") === targetVoiceConfig.code.toLowerCase()) ||
+        voices.find((v) => v.lang.toLowerCase().startsWith(prefix + "-") || v.lang.toLowerCase() === prefix) ||
+        voices.find((v) => targetVoiceConfig.keywords.some((kw) => v.name.toLowerCase().includes(kw)));
+    }
+
+    if (!selectedVoice) {
+      const displayName = targetVoiceConfig ? `${targetVoiceConfig.name} (${targetVoiceConfig.code})` : voiceLang;
+      setVoiceWarning(
+        `No compatible ${displayName} speech voice was found on your browser or device. You may need to install a ${displayName} language pack in your OS speech settings.`
+      );
+      return;
     } else if (warningMsg) {
       setVoiceWarning(warningMsg);
     } else {
@@ -410,6 +442,7 @@ function App() {
     setSummary("");
     setSummaryEn("");
     setSummaryKn("");
+    setSummariesByLang({});
     setQuestion("");
     setAnswer("");
     setIsSupported(null);
@@ -597,16 +630,22 @@ function App() {
     window.setTimeout(() => URL.revokeObjectURL(url), 1000);
   }
 
-  async function generateSummary() {
+  async function generateSummary(requestedLang) {
+    const targetLang = typeof requestedLang === "string" ? requestedLang : summaryLang;
     if (!editedText.trim()) {
       setError("Extract or enter some text before summarizing.");
       return;
     }
 
+    // Check cache first
+    if (summariesByLang[targetLang]) {
+      const cached = summariesByLang[targetLang];
+      setSummary(cached.summary || "");
+      setSummaryLang(targetLang);
+      return;
+    }
+
     setSummaryLoading(true);
-    setSummary("");
-    setSummaryEn("");
-    setSummaryKn("");
     setError("");
 
     try {
@@ -617,6 +656,7 @@ function App() {
         },
         body: JSON.stringify({
           text: editedText,
+          language: targetLang,
         }),
       });
 
@@ -627,14 +667,32 @@ function App() {
 
       const en = data.summary_en || "";
       const kn = data.summary_kn || "";
-      const main = data.summary || kn || en || "No summary was returned.";
+      const main = data.summary || (targetLang === "en" ? en : kn) || "No summary was returned.";
+
       setSummary(main);
-      setSummaryEn(en);
-      setSummaryKn(kn);
+      if (en) setSummaryEn(en);
+      if (kn) setSummaryKn(kn);
+      setSummaryLang(targetLang);
+
+      setSummariesByLang((prev) => {
+        const next = { ...prev, [targetLang]: { summary: main, rtl: Boolean(data.rtl), experimental: Boolean(data.experimental) } };
+        if (en && !next.en) next.en = { summary: en, rtl: false };
+        if (kn && !next.kn) next.kn = { summary: kn, rtl: false };
+        return next;
+      });
     } catch (err) {
       setError(`Summary failed: ${err.message}`);
     } finally {
       setSummaryLoading(false);
+    }
+  }
+
+  function handleSelectSummaryLanguage(langCode) {
+    setSummaryLang(langCode);
+    if (summariesByLang[langCode]) {
+      setSummary(summariesByLang[langCode].summary || "");
+    } else if (editedText.trim()) {
+      generateSummary(langCode);
     }
   }
 
@@ -1327,85 +1385,174 @@ function App() {
                   Generate a concise summary and key points from your transcribed handwritten text.
                 </p>
 
-                {!aiStatusChecked ? (
+{!aiStatusChecked ? (
                   <p role="status">Checking AI availability...</p>
                 ) : !aiConfigured ? (
                   <p role="status">
                     AI features are not configured. Set up a supported AI provider in the backend to enable summaries.
                   </p>
                 ) : (
-                  <div style={actionRowStyle}>
-                    <button
-                      type="button"
-                      className="primary-button"
-                      onClick={generateSummary}
-                      disabled={summaryLoading || !editedText.trim()}
-                    >
-                      {summaryLoading ? "Generating summary..." : "Summarize transcription"}
-                    </button>
+                  <>
+                  {/* Summary Language Selector */}
+                <div style={{ marginTop: "12px", marginBottom: "16px" }}>
+                  <label style={{ ...labelStyle, fontSize: "12px", color: "#554b8c", marginBottom: "6px" }}>
+                    Select Summary Language:
+                  </label>
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: "6px" }}>
+                    {SUMMARY_LANGUAGES.map((lang) => {
+                      const isSelected = summaryLang === lang.code;
+                      const hasCached = Boolean(summariesByLang[lang.code]);
+                      return (
+                        <button
+                          key={lang.code}
+                          type="button"
+                          onClick={() => handleSelectSummaryLanguage(lang.code)}
+                          disabled={summaryLoading}
+                          style={{
+                            padding: "5px 11px",
+                            borderRadius: "6px",
+                            fontSize: "11px",
+                            fontWeight: isSelected ? "700" : "500",
+                            border: isSelected ? "1.5px solid #725cde" : "1px solid #d8d4e8",
+                            background: isSelected ? "#f4f0ff" : "#fff",
+                            color: isSelected ? "#5945c5" : "#4a4658",
+                            cursor: summaryLoading ? "not-allowed" : "pointer",
+                            transition: "all 0.15s ease",
+                            display: "inline-flex",
+                            alignItems: "center",
+                            gap: "4px",
+                          }}
+                        >
+                          <span>{lang.native}</span>
+                          {hasCached && <span style={{ fontSize: "9px", color: "#25825b" }}>●</span>}
+                          {lang.experimental && <span style={{ fontSize: "9px", color: "#d97706", fontWeight: "normal" }}>(Exp)</span>}
+                        </button>
+                      );
+                    })}
                   </div>
+                </div>
+
+                {/* Primary Action Button */}
+                <div style={actionRowStyle}>
+                  <button
+                    type="button"
+                    className="primary-button"
+                    onClick={() => generateSummary(summaryLang)}
+                    disabled={summaryLoading || !editedText.trim()}
+                  >
+                    {summaryLoading ? "Generating summary..." : `Summarize in ${SUMMARY_LANGUAGES.find((l) => l.code === summaryLang)?.name || "Language"}`}
+                  </button>
+                </div>
+
+                {summaryLoading && (
+                  <p role="status" style={{ fontSize: "13px", color: "#725cde", marginTop: "10px" }}>
+                    Generating {SUMMARY_LANGUAGES.find((l) => l.code === summaryLang)?.name || ""} summary with authentic grammar & script...
+                  </p>
                 )}
 
-                {(summary || summaryEn || summaryKn) && (
+                {/* Multilingual Summary Display */}
+                {(summary || summaryEn || summaryKn || Object.keys(summariesByLang).length > 0) && (
                   <div style={{ ...outputStyle, display: "flex", flexDirection: "column", gap: "16px" }}>
-                    {/* English Summary */}
-                    <div style={{ padding: "14px 16px", background: "#fbfbfe", borderRadius: "8px", border: "1px solid #e2def2" }}>
-                      <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "8px" }}>
-                        <span style={{ fontSize: "11px", fontWeight: "700", textTransform: "uppercase", letterSpacing: "0.5px", color: "#554b8c" }}>
-                          🇬🇧 English Summary
-                        </span>
-                      </div>
-                      <p style={{ ...paragraphStyle, margin: 0, color: "#252238" }} lang="en">
-                        {voicePlaying && voiceSource === "summary" && voiceLang === "en-IN" && activeSentenceIndex !== null ? (
-                          getSentenceSegments(summaryEn || summary).map((seg, idx) => (
-                            <span
-                              key={idx}
-                              style={{
-                                background: idx === activeSentenceIndex ? "rgba(114, 92, 222, 0.22)" : "transparent",
-                                borderRadius: "4px",
-                                padding: idx === activeSentenceIndex ? "2px 4px" : "0",
-                                transition: "background 0.2s ease",
-                                fontWeight: idx === activeSentenceIndex ? "600" : "normal",
-                              }}
-                            >
-                              {seg}
-                            </span>
-                          ))
-                        ) : (
-                          summaryEn || summary || "English summary not available."
-                        )}
-                      </p>
-                    </div>
+                    {/* Active Selected Language Card */}
+                    {(() => {
+                      const activeConfig = SUMMARY_LANGUAGES.find((l) => l.code === summaryLang) || SUMMARY_LANGUAGES[0];
+                      const activeText = summariesByLang[summaryLang]?.summary || (summaryLang === "en" ? (summaryEn || summary) : (summaryLang === "kn" ? (summaryKn || summary) : summary));
+                      const isRTL = activeConfig.rtl;
 
-                    {/* Kannada Summary */}
-                    <div style={{ padding: "14px 16px", background: "#fdfcfe", borderRadius: "8px", border: "1.5px solid #dcd7f2" }}>
-                      <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "8px" }}>
-                        <span style={{ fontSize: "11px", fontWeight: "700", textTransform: "uppercase", letterSpacing: "0.5px", color: "#5945c5" }}>
-                          🇮🇳 ಕನ್ನಡ ಸಾರಾಂಶ
-                        </span>
-                      </div>
-                      <p style={{ ...paragraphStyle, margin: 0, color: "#252238", lineHeight: 1.85 }} lang="kn">
-                        {voicePlaying && voiceSource === "summary" && voiceLang === "kn-IN" && activeSentenceIndex !== null ? (
-                          getSentenceSegments(summaryKn || summary).map((seg, idx) => (
-                            <span
-                              key={idx}
-                              style={{
-                                background: idx === activeSentenceIndex ? "rgba(114, 92, 222, 0.22)" : "transparent",
-                                borderRadius: "4px",
-                                padding: idx === activeSentenceIndex ? "2px 4px" : "0",
-                                transition: "background 0.2s ease",
-                                fontWeight: idx === activeSentenceIndex ? "600" : "normal",
-                              }}
-                            >
-                              {seg}
+                      return (
+                        <div style={{ padding: "16px", background: "#fdfcfe", borderRadius: "10px", border: "2px solid #725cde", boxShadow: "0 2px 10px rgba(114, 92, 222, 0.08)" }}>
+                          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "10px", flexWrap: "wrap", gap: "8px" }}>
+                            <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                              <span style={{ fontSize: "12px", fontWeight: "700", color: "#5945c5", textTransform: "uppercase", letterSpacing: "0.5px" }}>
+                                🌟 {activeConfig.native} Summary
+                              </span>
+                              {activeConfig.experimental && (
+                                <span style={{ fontSize: "10px", background: "#fffbeb", color: "#b45309", padding: "2px 6px", borderRadius: "4px", border: "1px solid #fde68a" }}>
+                                  Experimental Dialect
+                                </span>
+                              )}
+                            </div>
+                            <span style={{ fontSize: "11px", color: "#67667a" }}>
+                              Script: {activeConfig.script}
                             </span>
-                          ))
-                        ) : (
-                          summaryKn || summary || "ಕನ್ನಡ ಸಾರಾಂಶ ಲಭ್ಯವಿಲ್ಲ."
-                        )}
-                      </p>
-                    </div>
+                          </div>
+
+                          {activeConfig.code === "tcy" && (
+                            <p style={{ fontSize: "11px", color: "#67667a", margin: "0 0 10px 0", fontStyle: "italic", background: "#f8f7fc", padding: "6px 10px", borderRadius: "6px" }}>
+                              ℹ️ Tulu is presented in Kannada script with authentic Tulu vocabulary.
+                            </p>
+                          )}
+                          {activeConfig.code === "gom" && (
+                            <p style={{ fontSize: "11px", color: "#67667a", margin: "0 0 10px 0", fontStyle: "italic", background: "#f8f7fc", padding: "6px 10px", borderRadius: "6px" }}>
+                              ℹ️ Konkani is presented in Devanagari script with natural Goan/Konkani phrasing.
+                            </p>
+                          )}
+
+                          <p
+                            dir={isRTL ? "rtl" : "ltr"}
+                            lang={activeConfig.code}
+                            style={{
+                              ...paragraphStyle,
+                              margin: 0,
+                              color: "#252238",
+                              lineHeight: 1.85,
+                              textAlign: isRTL ? "right" : "left",
+                              fontFamily: isRTL ? "Urdu Typesetting, 'Jameel Noori Nastaleeq', Tahoma, sans-serif" : "inherit",
+                              fontSize: isRTL ? "1.1rem" : "1rem",
+                            }}
+                          >
+                            {voicePlaying && voiceSource === "summary" && activeSentenceIndex !== null ? (
+                              getSentenceSegments(activeText).map((seg, idx) => (
+                                <span
+                                  key={idx}
+                                  style={{
+                                    background: idx === activeSentenceIndex ? "rgba(114, 92, 222, 0.22)" : "transparent",
+                                    borderRadius: "4px",
+                                    padding: idx === activeSentenceIndex ? "2px 4px" : "0",
+                                    transition: "background 0.2s ease",
+                                    fontWeight: idx === activeSentenceIndex ? "600" : "normal",
+                                  }}
+                                >
+                                  {seg}
+                                </span>
+                              ))
+                            ) : (
+                              activeText || "No summary available for this language yet. Click summarize above to generate."
+                            )}
+                          </p>
+                        </div>
+                      );
+                    })()}
+
+                    {/* Quick Dual View: English and Kannada References */}
+                    {summaryLang !== "en" && (summaryEn || summariesByLang.en?.summary) && (
+                      <div style={{ padding: "12px 14px", background: "#fbfbfe", borderRadius: "8px", border: "1px solid #e2def2" }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "6px" }}>
+                          <span style={{ fontSize: "11px", fontWeight: "700", textTransform: "uppercase", letterSpacing: "0.5px", color: "#554b8c" }}>
+                            🇬🇧 English Summary Reference
+                          </span>
+                        </div>
+                        <p style={{ ...paragraphStyle, margin: 0, color: "#252238", fontSize: "13px" }} lang="en">
+                          {summariesByLang.en?.summary || summaryEn}
+                        </p>
+                      </div>
+                    )}
+
+                    {summaryLang !== "kn" && (summaryKn || summariesByLang.kn?.summary) && (
+                      <div style={{ padding: "12px 14px", background: "#fdfcfe", borderRadius: "8px", border: "1px solid #e2def2" }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "6px" }}>
+                          <span style={{ fontSize: "11px", fontWeight: "700", textTransform: "uppercase", letterSpacing: "0.5px", color: "#5945c5" }}>
+                            🇮🇳 ಕನ್ನಡ ಸಾರಾಂಶ Reference
+                          </span>
+                        </div>
+                        <p style={{ ...paragraphStyle, margin: 0, color: "#252238", lineHeight: 1.8, fontSize: "13px" }} lang="kn">
+                          {summariesByLang.kn?.summary || summaryKn}
+                        </p>
+                      </div>
+                    )}
                   </div>
+                )}
+                  </>
                 )}
               </section>
 
@@ -1568,49 +1715,40 @@ function App() {
                     </div>
                   </div>
 
-                  <div>
+<div>
                     <label style={{ ...labelStyle, marginBottom: "4px", fontSize: "12px", color: "#554b8c" }}>
                       Voice Language:
                     </label>
-                    <div style={{ display: "flex", gap: "8px" }}>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setVoiceLang("kn-IN");
-                          setVoiceWarning("");
-                        }}
-                        style={{
-                          padding: "6px 12px",
-                          borderRadius: "6px",
-                          fontSize: "12px",
-                          fontWeight: "600",
-                          border: voiceLang === "kn-IN" ? "1.5px solid #725cde" : "1px solid #d8d4e8",
-                          background: voiceLang === "kn-IN" ? "#f4f0ff" : "#fff",
-                          color: voiceLang === "kn-IN" ? "#5945c5" : "#4a4658",
-                          cursor: "pointer",
-                        }}
-                      >
-                        ಕನ್ನಡ (kn-IN)
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setVoiceLang("en-IN");
-                          setVoiceWarning("");
-                        }}
-                        style={{
-                          padding: "6px 12px",
-                          borderRadius: "6px",
-                          fontSize: "12px",
-                          fontWeight: "600",
-                          border: voiceLang === "en-IN" ? "1.5px solid #725cde" : "1px solid #d8d4e8",
-                          background: voiceLang === "en-IN" ? "#f4f0ff" : "#fff",
-                          color: voiceLang === "en-IN" ? "#5945c5" : "#4a4658",
-                          cursor: "pointer",
-                        }}
-                      >
-                        English (en-IN)
-                      </button>
+                    <div style={{ display: "flex", flexWrap: "wrap", gap: "6px" }}>
+                      {VOICE_LANGUAGES.map((vLang) => {
+                        const isSelected = voiceLang === vLang.code;
+                        return (
+                          <button
+                            key={vLang.code}
+                            type="button"
+                            onClick={() => {
+                              setVoiceLang(vLang.code);
+                              setVoiceWarning("");
+                            }}
+                            style={{
+                              padding: "5px 10px",
+                              borderRadius: "6px",
+                              fontSize: "11px",
+                              fontWeight: isSelected ? "700" : "500",
+                              border: isSelected ? "1.5px solid #725cde" : "1px solid #d8d4e8",
+                              background: isSelected ? "#f4f0ff" : "#fff",
+                              color: isSelected ? "#5945c5" : "#4a4658",
+                              cursor: "pointer",
+                              display: "inline-flex",
+                              alignItems: "center",
+                              gap: "3px",
+                            }}
+                          >
+                            <span>{vLang.native}</span>
+                            {vLang.noDirectVoice && <span style={{ fontSize: "9px", color: "#9ca3af" }}>⚠️</span>}
+                          </button>
+                        );
+                      })}
                     </div>
                   </div>
                 </div>
@@ -1717,7 +1855,7 @@ function App() {
                         color: "#252238",
                       }}
                     >
-                      {getSentenceSegments(voiceSource === "summary" ? summary : editedText).map((seg, idx) => (
+                      {getSentenceSegments(voiceSource === "summary" ? ((summariesByLang[summaryLang]?.summary) || summary || summaryKn || summaryEn) : editedText).map((seg, idx) => (
                         <span
                           key={idx}
                           style={{
@@ -2268,80 +2406,167 @@ function App() {
                     OCR, editing, copying, and downloading remain available.
                   </p>
                 ) : (
+                  <>
+                  {/* Summary Language Selector */}
+                <div style={{ marginTop: "12px", marginBottom: "16px" }}>
+                  <label style={{ ...labelStyle, fontSize: "12px", color: "#554b8c", marginBottom: "6px" }}>
+                    Select Summary Language:
+                  </label>
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: "6px" }}>
+                    {SUMMARY_LANGUAGES.map((lang) => {
+                      const isSelected = summaryLang === lang.code;
+                      const hasCached = Boolean(summariesByLang[lang.code]);
+                      return (
+                        <button
+                          key={lang.code}
+                          type="button"
+                          onClick={() => handleSelectSummaryLanguage(lang.code)}
+                          disabled={summaryLoading}
+                          style={{
+                            padding: "5px 11px",
+                            borderRadius: "6px",
+                            fontSize: "11px",
+                            fontWeight: isSelected ? "700" : "500",
+                            border: isSelected ? "1.5px solid #725cde" : "1px solid #d8d4e8",
+                            background: isSelected ? "#f4f0ff" : "#fff",
+                            color: isSelected ? "#5945c5" : "#4a4658",
+                            cursor: summaryLoading ? "not-allowed" : "pointer",
+                            transition: "all 0.15s ease",
+                            display: "inline-flex",
+                            alignItems: "center",
+                            gap: "4px",
+                          }}
+                        >
+                          <span>{lang.native}</span>
+                          {hasCached && <span style={{ fontSize: "9px", color: "#25825b" }}>●</span>}
+                          {lang.experimental && <span style={{ fontSize: "9px", color: "#d97706", fontWeight: "normal" }}>(Exp)</span>}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* Primary Action Button */}
+                <div style={actionRowStyle}>
                   <button
                     type="button"
                     className="primary-button"
-                    onClick={generateSummary}
+                    onClick={() => generateSummary(summaryLang)}
                     disabled={summaryLoading || !editedText.trim()}
                   >
-                    {summaryLoading ? "Summarizing..." : "Summarize document"}
+                    {summaryLoading ? "Generating summary..." : `Summarize in ${SUMMARY_LANGUAGES.find((l) => l.code === summaryLang)?.name || "Language"}`}
                   </button>
-                )}
+                </div>
 
                 {summaryLoading && (
-                  <p role="status">Generating your summary...</p>
+                  <p role="status" style={{ fontSize: "13px", color: "#725cde", marginTop: "10px" }}>
+                    Generating {SUMMARY_LANGUAGES.find((l) => l.code === summaryLang)?.name || ""} summary with authentic grammar & script...
+                  </p>
                 )}
 
-                {(summary || summaryEn || summaryKn) && (
+                {/* Multilingual Summary Display */}
+                {(summary || summaryEn || summaryKn || Object.keys(summariesByLang).length > 0) && (
                   <div style={{ ...outputStyle, display: "flex", flexDirection: "column", gap: "16px" }}>
-                    {/* English Summary */}
-                    <div style={{ padding: "14px 16px", background: "#fbfbfe", borderRadius: "8px", border: "1px solid #e2def2" }}>
-                      <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "8px" }}>
-                        <span style={{ fontSize: "11px", fontWeight: "700", textTransform: "uppercase", letterSpacing: "0.5px", color: "#554b8c" }}>
-                          🇬🇧 English Summary
-                        </span>
-                      </div>
-                      <p style={{ ...paragraphStyle, margin: 0, color: "#252238" }} lang="en">
-                        {voicePlaying && voiceSource === "summary" && voiceLang === "en-IN" && activeSentenceIndex !== null ? (
-                          getSentenceSegments(summaryEn || summary).map((seg, idx) => (
-                            <span
-                              key={idx}
-                              style={{
-                                background: idx === activeSentenceIndex ? "rgba(114, 92, 222, 0.22)" : "transparent",
-                                borderRadius: "4px",
-                                padding: idx === activeSentenceIndex ? "2px 4px" : "0",
-                                transition: "background 0.2s ease",
-                                fontWeight: idx === activeSentenceIndex ? "600" : "normal",
-                              }}
-                            >
-                              {seg}
-                            </span>
-                          ))
-                        ) : (
-                          summaryEn || summary || "English summary not available."
-                        )}
-                      </p>
-                    </div>
+                    {/* Active Selected Language Card */}
+                    {(() => {
+                      const activeConfig = SUMMARY_LANGUAGES.find((l) => l.code === summaryLang) || SUMMARY_LANGUAGES[0];
+                      const activeText = summariesByLang[summaryLang]?.summary || (summaryLang === "en" ? (summaryEn || summary) : (summaryLang === "kn" ? (summaryKn || summary) : summary));
+                      const isRTL = activeConfig.rtl;
 
-                    {/* Kannada Summary */}
-                    <div style={{ padding: "14px 16px", background: "#fdfcfe", borderRadius: "8px", border: "1.5px solid #dcd7f2" }}>
-                      <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "8px" }}>
-                        <span style={{ fontSize: "11px", fontWeight: "700", textTransform: "uppercase", letterSpacing: "0.5px", color: "#5945c5" }}>
-                          🇮🇳 ಕನ್ನಡ ಸಾರಾಂಶ
-                        </span>
-                      </div>
-                      <p style={{ ...paragraphStyle, margin: 0, color: "#252238", lineHeight: 1.85 }} lang="kn">
-                        {voicePlaying && voiceSource === "summary" && voiceLang === "kn-IN" && activeSentenceIndex !== null ? (
-                          getSentenceSegments(summaryKn || summary).map((seg, idx) => (
-                            <span
-                              key={idx}
-                              style={{
-                                background: idx === activeSentenceIndex ? "rgba(114, 92, 222, 0.22)" : "transparent",
-                                borderRadius: "4px",
-                                padding: idx === activeSentenceIndex ? "2px 4px" : "0",
-                                transition: "background 0.2s ease",
-                                fontWeight: idx === activeSentenceIndex ? "600" : "normal",
-                              }}
-                            >
-                              {seg}
+                      return (
+                        <div style={{ padding: "16px", background: "#fdfcfe", borderRadius: "10px", border: "2px solid #725cde", boxShadow: "0 2px 10px rgba(114, 92, 222, 0.08)" }}>
+                          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "10px", flexWrap: "wrap", gap: "8px" }}>
+                            <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                              <span style={{ fontSize: "12px", fontWeight: "700", color: "#5945c5", textTransform: "uppercase", letterSpacing: "0.5px" }}>
+                                🌟 {activeConfig.native} Summary
+                              </span>
+                              {activeConfig.experimental && (
+                                <span style={{ fontSize: "10px", background: "#fffbeb", color: "#b45309", padding: "2px 6px", borderRadius: "4px", border: "1px solid #fde68a" }}>
+                                  Experimental Dialect
+                                </span>
+                              )}
+                            </div>
+                            <span style={{ fontSize: "11px", color: "#67667a" }}>
+                              Script: {activeConfig.script}
                             </span>
-                          ))
-                        ) : (
-                          summaryKn || summary || "ಕನ್ನಡ ಸಾರಾಂಶ ಲಭ್ಯವಿಲ್ಲ."
-                        )}
-                      </p>
-                    </div>
+                          </div>
+
+                          {activeConfig.code === "tcy" && (
+                            <p style={{ fontSize: "11px", color: "#67667a", margin: "0 0 10px 0", fontStyle: "italic", background: "#f8f7fc", padding: "6px 10px", borderRadius: "6px" }}>
+                              ℹ️ Tulu is presented in Kannada script with authentic Tulu vocabulary.
+                            </p>
+                          )}
+                          {activeConfig.code === "gom" && (
+                            <p style={{ fontSize: "11px", color: "#67667a", margin: "0 0 10px 0", fontStyle: "italic", background: "#f8f7fc", padding: "6px 10px", borderRadius: "6px" }}>
+                              ℹ️ Konkani is presented in Devanagari script with natural Goan/Konkani phrasing.
+                            </p>
+                          )}
+
+                          <p
+                            dir={isRTL ? "rtl" : "ltr"}
+                            lang={activeConfig.code}
+                            style={{
+                              ...paragraphStyle,
+                              margin: 0,
+                              color: "#252238",
+                              lineHeight: 1.85,
+                              textAlign: isRTL ? "right" : "left",
+                              fontFamily: isRTL ? "Urdu Typesetting, 'Jameel Noori Nastaleeq', Tahoma, sans-serif" : "inherit",
+                              fontSize: isRTL ? "1.1rem" : "1rem",
+                            }}
+                          >
+                            {voicePlaying && voiceSource === "summary" && activeSentenceIndex !== null ? (
+                              getSentenceSegments(activeText).map((seg, idx) => (
+                                <span
+                                  key={idx}
+                                  style={{
+                                    background: idx === activeSentenceIndex ? "rgba(114, 92, 222, 0.22)" : "transparent",
+                                    borderRadius: "4px",
+                                    padding: idx === activeSentenceIndex ? "2px 4px" : "0",
+                                    transition: "background 0.2s ease",
+                                    fontWeight: idx === activeSentenceIndex ? "600" : "normal",
+                                  }}
+                                >
+                                  {seg}
+                                </span>
+                              ))
+                            ) : (
+                              activeText || "No summary available for this language yet. Click summarize above to generate."
+                            )}
+                          </p>
+                        </div>
+                      );
+                    })()}
+
+                    {/* Quick Dual View: English and Kannada References */}
+                    {summaryLang !== "en" && (summaryEn || summariesByLang.en?.summary) && (
+                      <div style={{ padding: "12px 14px", background: "#fbfbfe", borderRadius: "8px", border: "1px solid #e2def2" }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "6px" }}>
+                          <span style={{ fontSize: "11px", fontWeight: "700", textTransform: "uppercase", letterSpacing: "0.5px", color: "#554b8c" }}>
+                            🇬🇧 English Summary Reference
+                          </span>
+                        </div>
+                        <p style={{ ...paragraphStyle, margin: 0, color: "#252238", fontSize: "13px" }} lang="en">
+                          {summariesByLang.en?.summary || summaryEn}
+                        </p>
+                      </div>
+                    )}
+
+                    {summaryLang !== "kn" && (summaryKn || summariesByLang.kn?.summary) && (
+                      <div style={{ padding: "12px 14px", background: "#fdfcfe", borderRadius: "8px", border: "1px solid #e2def2" }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "6px" }}>
+                          <span style={{ fontSize: "11px", fontWeight: "700", textTransform: "uppercase", letterSpacing: "0.5px", color: "#5945c5" }}>
+                            🇮🇳 ಕನ್ನಡ ಸಾರಾಂಶ Reference
+                          </span>
+                        </div>
+                        <p style={{ ...paragraphStyle, margin: 0, color: "#252238", lineHeight: 1.8, fontSize: "13px" }} lang="kn">
+                          {summariesByLang.kn?.summary || summaryKn}
+                        </p>
+                      </div>
+                    )}
                   </div>
+                )}
+                  </>
                 )}
               </section>
 
@@ -2768,49 +2993,40 @@ function App() {
                     </div>
                   </div>
 
-                  <div>
+<div>
                     <label style={{ ...labelStyle, marginBottom: "4px", fontSize: "12px", color: "#554b8c" }}>
                       Voice Language:
                     </label>
-                    <div style={{ display: "flex", gap: "8px" }}>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setVoiceLang("kn-IN");
-                          setVoiceWarning("");
-                        }}
-                        style={{
-                          padding: "6px 12px",
-                          borderRadius: "6px",
-                          fontSize: "12px",
-                          fontWeight: "600",
-                          border: voiceLang === "kn-IN" ? "1.5px solid #725cde" : "1px solid #d8d4e8",
-                          background: voiceLang === "kn-IN" ? "#f4f0ff" : "#fff",
-                          color: voiceLang === "kn-IN" ? "#5945c5" : "#4a4658",
-                          cursor: "pointer",
-                        }}
-                      >
-                        ಕನ್ನಡ (kn-IN)
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setVoiceLang("en-IN");
-                          setVoiceWarning("");
-                        }}
-                        style={{
-                          padding: "6px 12px",
-                          borderRadius: "6px",
-                          fontSize: "12px",
-                          fontWeight: "600",
-                          border: voiceLang === "en-IN" ? "1.5px solid #725cde" : "1px solid #d8d4e8",
-                          background: voiceLang === "en-IN" ? "#f4f0ff" : "#fff",
-                          color: voiceLang === "en-IN" ? "#5945c5" : "#4a4658",
-                          cursor: "pointer",
-                        }}
-                      >
-                        English (en-IN)
-                      </button>
+                    <div style={{ display: "flex", flexWrap: "wrap", gap: "6px" }}>
+                      {VOICE_LANGUAGES.map((vLang) => {
+                        const isSelected = voiceLang === vLang.code;
+                        return (
+                          <button
+                            key={vLang.code}
+                            type="button"
+                            onClick={() => {
+                              setVoiceLang(vLang.code);
+                              setVoiceWarning("");
+                            }}
+                            style={{
+                              padding: "5px 10px",
+                              borderRadius: "6px",
+                              fontSize: "11px",
+                              fontWeight: isSelected ? "700" : "500",
+                              border: isSelected ? "1.5px solid #725cde" : "1px solid #d8d4e8",
+                              background: isSelected ? "#f4f0ff" : "#fff",
+                              color: isSelected ? "#5945c5" : "#4a4658",
+                              cursor: "pointer",
+                              display: "inline-flex",
+                              alignItems: "center",
+                              gap: "3px",
+                            }}
+                          >
+                            <span>{vLang.native}</span>
+                            {vLang.noDirectVoice && <span style={{ fontSize: "9px", color: "#9ca3af" }}>⚠️</span>}
+                          </button>
+                        );
+                      })}
                     </div>
                   </div>
                 </div>
@@ -2917,7 +3133,7 @@ function App() {
                         color: "#252238",
                       }}
                     >
-                      {getSentenceSegments(voiceSource === "summary" ? summary : editedText).map((seg, idx) => (
+                      {getSentenceSegments(voiceSource === "summary" ? ((summariesByLang[summaryLang]?.summary) || summary || summaryKn || summaryEn) : editedText).map((seg, idx) => (
                         <span
                           key={idx}
                           style={{

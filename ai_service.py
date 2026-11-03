@@ -268,66 +268,110 @@ def _gemini_vision_generate(
     system_prompt: str,
     max_tokens: int,
 ) -> str:
-    """Generate text from an image using Gemini Vision.
+    """Generate text from an image using Gemini Vision with retry and model fallback.
 
-    Accepts raw image bytes (already decoded by the caller) and sends them
-    as an inline base64 data URI in the Gemini generateContent request.
+    Accepts raw image bytes and sends them as an inline base64 data URI in the
+    Gemini generateContent request. Automatically handles transient provider
+    errors (503, 429) with exponential backoff, and falls back to standard
+    vision model aliases if the primary model fails with 404 or 503.
     """
     import base64 as _base64
+    import time as _time
 
     image_data = _base64.b64encode(image_bytes).decode("utf-8")
 
-    url = (
-        f"{GEMINI_URL}/{provider.model}:generateContent"
-        f"?key={provider.api_key}"
-    )
+    # Candidate models to try in case of model retirement or transient 503/404
+    candidate_models = [provider.model]
+    for fallback_model in ["gemini-2.0-flash", "gemini-1.5-flash", "gemini-1.5-pro"]:
+        if fallback_model not in candidate_models:
+            candidate_models.append(fallback_model)
 
-    payload = {
-        "systemInstruction": {
-            "parts": [{"text": system_prompt}]
-        },
-        "contents": [
-            {
-                "role": "user",
-                "parts": [
-                    {
-                        "text": user_prompt,
-                    },
-                    {
-                        "inline_data": {
-                            "mime_type": image_mime_type,
-                            "data": image_data,
-                        }
-                    },
-                ],
-            }
-        ],
-        "generationConfig": {
-            "temperature": 0.2,
-            "maxOutputTokens": max_tokens,
-        },
-    }
+    last_error = None
 
-    response = requests.post(
-        url,
-        json=payload,
-        timeout=REQUEST_TIMEOUT_SECONDS,
-    )
+    for model_name in candidate_models:
+        url = (
+            f"{GEMINI_URL}/{model_name}:generateContent"
+            f"?key={provider.api_key}"
+        )
 
-    _check_response(response, provider.name)
+        payload = {
+            "systemInstruction": {
+                "parts": [{"text": system_prompt}]
+            },
+            "contents": [
+                {
+                    "role": "user",
+                    "parts": [
+                        {
+                            "text": user_prompt,
+                        },
+                        {
+                            "inline_data": {
+                                "mime_type": image_mime_type,
+                                "data": image_data,
+                            }
+                        },
+                    ],
+                }
+            ],
+            "generationConfig": {
+                "temperature": 0.2,
+                "maxOutputTokens": max_tokens,
+            },
+        }
 
-    try:
-        data = response.json()
-        answer = data["candidates"][0]["content"]["parts"][0]["text"]
-    except (ValueError, KeyError, IndexError, TypeError) as exc:
-        raise AIRequestError(
-            f"Gemini Vision returned an invalid response: {exc}"
-        ) from exc
+        # Try up to 2 attempts per candidate model with short backoff on 503 / 429
+        for attempt in range(2):
+            try:
+                response = requests.post(
+                    url,
+                    json=payload,
+                    timeout=min(REQUEST_TIMEOUT_SECONDS, 35),
+                )
+            except requests.RequestException as req_err:
+                last_error = req_err
+                if attempt == 0:
+                    _time.sleep(1.0)
+                    continue
+                break
 
-    if not isinstance(answer, str) or not answer.strip():
-        raise AIRequestError("Gemini Vision returned an empty response")
+            if response.status_code in (429, 503) and attempt == 0:
+                _time.sleep(1.5)
+                continue
 
-    return answer.strip()
+            if response.status_code == 404:
+                # Model name not supported on this endpoint/version, try next candidate
+                last_error = AIRequestError(f"Model {model_name} not found (404)")
+                break
+
+            if not response.ok:
+                try:
+                    _check_response(response, provider.name)
+                except AIRequestError as e:
+                    last_error = e
+                break
+
+            try:
+                data = response.json()
+                candidates = data.get("candidates", [])
+                if not candidates:
+                    raise AIRequestError("Gemini returned no candidates in response")
+                answer = candidates[0]["content"]["parts"][0]["text"]
+            except (ValueError, KeyError, IndexError, TypeError) as exc:
+                last_error = AIRequestError(f"Gemini Vision returned an invalid response: {exc}")
+                break
+
+            if not isinstance(answer, str) or not answer.strip():
+                last_error = AIRequestError("Gemini Vision returned an empty response")
+                break
+
+            return answer.strip()
+
+    if last_error:
+        if isinstance(last_error, (AIRequestError, AIUnavailableError)):
+            raise last_error
+        raise AIRequestError(f"Gemini Vision request failed: {last_error}")
+    raise AIRequestError("All Gemini Vision candidate models failed.")
 
 
 def _ollama_generate(

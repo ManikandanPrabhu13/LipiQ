@@ -892,32 +892,43 @@ async def handwriting_recognition(
         "Preserve paragraphs and line breaks. Mark uncertain words with [ಅಸ್ಪಷ್ಟ]."
     )
 
-    # Re-encode the decoded image back to PNG bytes for the Gemini request.
+    # Re-encode image to optimized JPEG (quality 85) for 4-5x smaller payload size
+    # compared to PNG, speeding up transmission to Gemini API.
     import io as _io2
-    from PIL import Image as _Image
 
-    png_buffer = _io2.BytesIO()
-    image.save(png_buffer, format="PNG")
-    image_bytes = png_buffer.getvalue()
+    jpeg_buffer = _io2.BytesIO()
+    image.save(jpeg_buffer, format="JPEG", quality=85, optimize=True)
+    image_bytes = jpeg_buffer.getvalue()
 
-    # Build a data URI for the UI to render the original image.
-    import base64 as _base64
-    image_data_url = _base64.b64encode(image_bytes).decode("utf-8")
-    image_data_url = f"data:image/png;base64,{image_data_url}"
-
+    # Offload the blocking vision API call to worker thread pool
+    loop = asyncio.get_running_loop()
     try:
-        transcribed = _gemini_vision_generate(
+        transcribed = await loop.run_in_executor(
+            _ocr_executor,
+            _gemini_vision_generate,
             gemini_provider,
             image_bytes,
-            "image/png",
+            "image/jpeg",
             user_prompt,
             system_prompt,
-            max_tokens=800,
+            800,
         )
-    except (AIRequestError, AIUnavailableError) as e:
+    except AIUnavailableError as e:
+        raise HTTPException(
+            status_code=503,
+            detail=f"Gemini Vision unavailable: {str(e)[:400]}",
+        )
+    except AIRequestError as e:
+        err_msg = str(e)
+        status_code = 503 if ("503" in err_msg or "rate limit" in err_msg.lower() or "429" in err_msg) else 502
+        raise HTTPException(
+            status_code=status_code,
+            detail=f"Gemini Vision recognition failed: {err_msg[:400]}",
+        )
+    except Exception as e:
         raise HTTPException(
             status_code=502,
-            detail=f"Gemini Vision recognition failed: {str(e)[:400]}",
+            detail=f"Handwriting transcription error: {str(e)[:400]}",
         )
 
     # The Gemini output is a single block; split into lines preserving any

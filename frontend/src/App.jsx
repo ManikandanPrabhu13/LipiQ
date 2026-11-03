@@ -892,6 +892,8 @@ function App() {
       return;
     }
 
+    if (handwritingLoading) return; // Prevent duplicate concurrent requests
+
     setHandwritingLoading(true);
     setHandwritingError("");
     setError("");
@@ -900,10 +902,19 @@ function App() {
       const formData = new FormData();
       formData.append("file", file);
 
-      const response = await fetch(`${API_BASE}/api/handwriting`, {
-        method: "POST",
-        body: formData,
-      });
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 45000); // 45s timeout
+
+      let response;
+      try {
+        response = await fetch(`${API_BASE}/api/handwriting`, {
+          method: "POST",
+          body: formData,
+          signal: controller.signal,
+        });
+      } finally {
+        clearTimeout(timeoutId);
+      }
 
       const data = await readResponse(
         response,
@@ -919,11 +930,13 @@ function App() {
       setAnswer("");
       setInsights(null);
     } catch (err) {
-      setHandwritingError(
-        err.message.toLowerCase().includes("fetch")
-          ? "Cannot connect to LipiQ's backend. Make sure FastAPI is running."
-          : err.message
-      );
+      let msg = err.message || "";
+      if (err.name === "AbortError") {
+        msg = "Request timed out after 45s. The cloud vision service might be busy; please retry.";
+      } else if (msg.toLowerCase().includes("fetch")) {
+        msg = `Cannot reach backend at ${API_BASE}. Make sure the server is awake and accessible.`;
+      }
+      setHandwritingError(msg);
     } finally {
       setHandwritingLoading(false);
     }
@@ -1097,8 +1110,27 @@ function App() {
             </label>
 
             {(error || (handwritingMode && handwritingError)) && (
-              <div className="error-message" role="alert">
-                {handwritingMode && handwritingError ? handwritingError : error}
+              <div className="error-message" role="alert" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "10px" }}>
+                <span>{handwritingMode && handwritingError ? handwritingError : error}</span>
+                {handwritingMode && handwritingError && file && (
+                  <button
+                    type="button"
+                    onClick={transcribeHandwriting}
+                    disabled={handwritingLoading}
+                    style={{
+                      padding: "4px 10px",
+                      fontSize: "12px",
+                      borderRadius: "4px",
+                      border: "1px solid var(--accent, #e53935)",
+                      background: "white",
+                      cursor: "pointer",
+                      fontWeight: 600,
+                      whiteSpace: "nowrap",
+                    }}
+                  >
+                    Retry ↺
+                  </button>
+                )}
               </div>
             )}
 

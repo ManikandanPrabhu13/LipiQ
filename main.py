@@ -1,6 +1,7 @@
 from io import BytesIO
 import json
 import re
+import os
 from pathlib import Path
 
 import pytesseract
@@ -24,9 +25,13 @@ from evidence_match import find_all_evidence, normalize
 # --------------------------------------------------
 
 pytesseract.pytesseract.tesseract_cmd = (
-    r"C:\Program Files\Tesseract-OCR\tesseract.exe"
+    os.getenv("TESSERACT_CMD")
+    or (
+        r"C:\Program Files\Tesseract-OCR\tesseract.exe"
+        if os.name == "nt"
+        else "tesseract"
+    )
 )
-
 app = FastAPI(
     title="LipiQ API",
     description="Kannada document OCR with evidence coordinates",

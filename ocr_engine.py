@@ -1,7 +1,7 @@
 
 from collections import defaultdict
 from typing import Any
-
+import os
 import cv2
 import numpy as np
 import pytesseract
@@ -13,7 +13,12 @@ from ocr_layout import reconstruct_reading_order
 
 # Tesseract installation on your Windows laptop.
 pytesseract.pytesseract.tesseract_cmd = (
-    r"C:\Program Files\Tesseract-OCR\tesseract.exe"
+    os.getenv("TESSERACT_CMD")
+    or (
+        r"C:\Program Files\Tesseract-OCR\tesseract.exe"
+        if os.name == "nt"
+        else "tesseract"
+    )
 )
 
 OCR_LANGUAGES = "kan+eng"

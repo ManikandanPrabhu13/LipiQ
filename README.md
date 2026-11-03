@@ -56,8 +56,7 @@ Configure the required AI provider credentials using environment variables. Neve
 ## Project Links
 
 - **Source Code:** https://github.com/ManikandanPrabhu13/LipiQ
-- **Live Application:** [Add your deployed frontend URL]
-
+- **Live Application:** https://lipiq-frontend.vercel.app
 ## Impact
 
 LipiQ aims to make Kannada documents more accessible by transforming static document images into searchable, editable and AI-understandable information.

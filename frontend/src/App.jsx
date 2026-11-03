@@ -56,6 +56,23 @@ function App() {
   const [correctionMessage, setCorrectionMessage] = useState("");
   const [correctionCopied, setCorrectionCopied] = useState(false);
 
+  // Kannada handwriting recognition state
+  const [handwritingMode, setHandwritingMode] = useState(false);
+  const [handwritingLoading, setHandwritingLoading] = useState(false);
+  const [handwritingResult, setHandwritingResult] = useState(null);
+  const [handwritingError, setHandwritingError] = useState("");
+  const [handwrittenText, setHandwrittenText] = useState("");
+  const [hwCopied, setHwCopied] = useState(false);
+
+  // Voice Reader state (Kannada & English SpeechSynthesis)
+  const [voiceSource, setVoiceSource] = useState("document"); // "document" | "summary"
+  const [voiceLang, setVoiceLang] = useState("kn-IN"); // "kn-IN" | "en-IN"
+  const [voiceSpeed, setVoiceSpeed] = useState(1.0);
+  const [voicePlaying, setVoicePlaying] = useState(false);
+  const [voicePaused, setVoicePaused] = useState(false);
+  const [voiceWarning, setVoiceWarning] = useState("");
+  const [availableVoices, setAvailableVoices] = useState([]);
+
   useEffect(() => {
     return () => {
       if (preview) URL.revokeObjectURL(preview);
@@ -90,6 +107,175 @@ function App() {
     };
   }, []);
 
+  // Initialize SpeechSynthesis voices
+  useEffect(() => {
+    if (typeof window === "undefined" || !("speechSynthesis" in window)) {
+      return;
+    }
+
+    function updateVoices() {
+      const voices = window.speechSynthesis.getVoices() || [];
+      setAvailableVoices(voices);
+    }
+
+    updateVoices();
+    window.speechSynthesis.onvoiceschanged = updateVoices;
+
+    return () => {
+      if ("speechSynthesis" in window) {
+        window.speechSynthesis.cancel();
+      }
+    };
+  }, []);
+
+  // Stop speech when document source or language changes
+  useEffect(() => {
+    stopVoiceReader();
+    setVoiceWarning("");
+  }, [voiceSource, voiceLang]);
+
+  function stopVoiceReader() {
+    if (typeof window !== "undefined" && "speechSynthesis" in window) {
+      window.speechSynthesis.cancel();
+    }
+    setVoicePlaying(false);
+    setVoicePaused(false);
+  }
+
+  function detectKannadaText(str) {
+    return /[\u0C80-\u0CFF]/.test(str || "");
+  }
+
+  function handleVoicePlay() {
+    if (typeof window === "undefined" || !("speechSynthesis" in window)) {
+      setVoiceWarning("Browser speech synthesis is not supported on this device.");
+      return;
+    }
+
+    // Determine target text
+    const targetText = voiceSource === "summary" ? summary.trim() : editedText.trim();
+    if (!targetText) {
+      setVoiceWarning(
+        voiceSource === "summary"
+          ? "No AI summary available to read. Generate a summary first."
+          : "No document text available to read."
+      );
+      return;
+    }
+
+    // If currently paused, resume
+    if (voicePaused) {
+      window.speechSynthesis.resume();
+      setVoicePaused(false);
+      setVoicePlaying(true);
+      return;
+    }
+
+    // Cancel any previous utterance
+    window.speechSynthesis.cancel();
+
+    // Check script/language alignment
+    const containsKannada = detectKannadaText(targetText);
+    let warningMsg = "";
+    if (voiceLang === "kn-IN" && !containsKannada) {
+      warningMsg = "Document contains non-Kannada text. Kannada voice pronunciation may sound unusual.";
+    } else if (voiceLang === "en-IN" && containsKannada) {
+      warningMsg = "Document contains Kannada text. English voice pronunciation may sound incorrect.";
+    }
+
+    // Find best voice match
+    const voices = availableVoices.length > 0 ? availableVoices : (window.speechSynthesis.getVoices() || []);
+    let selectedVoice = null;
+
+    if (voiceLang === "kn-IN") {
+      selectedVoice = voices.find(
+        (v) => v.lang.toLowerCase().startsWith("kn") || v.name.toLowerCase().includes("kannada")
+      );
+    } else if (voiceLang === "en-IN") {
+      selectedVoice = voices.find((v) => v.lang.toLowerCase().replace("_", "-") === "en-in") ||
+        voices.find((v) => v.lang.toLowerCase().startsWith("en-")) ||
+        voices.find((v) => v.lang.toLowerCase().startsWith("en"));
+    }
+
+    if (!selectedVoice) {
+      // Check if fallback voice exists
+      selectedVoice = voices.find((v) => v.lang.toLowerCase().startsWith(voiceLang.slice(0, 2)));
+    }
+
+    if (!selectedVoice) {
+      const langName = voiceLang === "kn-IN" ? "Kannada (kn-IN)" : "English (en-IN)";
+      setVoiceWarning(
+        `No dedicated ${langName} voice found in your browser/OS. Speech may use default voice or fail to pronounce properly.`
+      );
+    } else if (warningMsg) {
+      setVoiceWarning(warningMsg);
+    } else {
+      setVoiceWarning("");
+    }
+
+    const utterance = new SpeechSynthesisUtterance(targetText);
+    utterance.lang = voiceLang;
+    utterance.rate = voiceSpeed;
+    if (selectedVoice) {
+      utterance.voice = selectedVoice;
+    }
+
+    utterance.onstart = () => {
+      setVoicePlaying(true);
+      setVoicePaused(false);
+    };
+
+    utterance.onend = () => {
+      setVoicePlaying(false);
+      setVoicePaused(false);
+    };
+
+    utterance.onerror = (e) => {
+      console.warn("SpeechSynthesis error:", e);
+      setVoicePlaying(false);
+      setVoicePaused(false);
+      if (e.error !== "canceled" && e.error !== "interrupted") {
+        setVoiceWarning(`Speech playback error: ${e.error}`);
+      }
+    };
+
+    window.speechSynthesis.speak(utterance);
+    setVoicePlaying(true);
+    setVoicePaused(false);
+  }
+
+  function handleVoicePause() {
+    if (typeof window !== "undefined" && "speechSynthesis" in window) {
+      if (window.speechSynthesis.speaking && !window.speechSynthesis.paused) {
+        window.speechSynthesis.pause();
+        setVoicePaused(true);
+        setVoicePlaying(false);
+      }
+    }
+  }
+
+  function handleVoiceResume() {
+    if (typeof window !== "undefined" && "speechSynthesis" in window) {
+      if (window.speechSynthesis.paused) {
+        window.speechSynthesis.resume();
+        setVoicePaused(false);
+        setVoicePlaying(true);
+      } else {
+        handleVoicePlay();
+      }
+    }
+  }
+
+  function handleVoiceSpeedChange(newSpeed) {
+    setVoiceSpeed(newSpeed);
+    // If currently speaking, restart with new speed
+    if (voicePlaying && !voicePaused) {
+      setTimeout(() => {
+        handleVoicePlay();
+      }, 50);
+    }
+  }
+
   function resetDocumentResults() {
     setResult(null);
     setEditedText("");
@@ -108,6 +294,12 @@ function App() {
     setCorrectedText("");
     setCorrectionMessage("");
     setCorrectionCopied(false);
+    setHandwritingResult(null);
+    setHandwritingError("");
+    setHandwrittenText("");
+    setHwCopied(false);
+    stopVoiceReader();
+    setVoiceWarning("");
   }
 
   function handleFileChange(event) {
@@ -566,6 +758,83 @@ function App() {
     setAnswer("");
   }
 
+  // Handwriting actions
+  async function transcribeHandwriting() {
+    if (!file) {
+      setHandwritingError("Please upload a handwritten Kannada document image first.");
+      return;
+    }
+
+    setHandwritingLoading(true);
+    setHandwritingError("");
+    setError("");
+
+    try {
+      const formData = new FormData();
+      formData.append("file", file);
+
+      const response = await fetch(`${API_BASE}/api/handwriting`, {
+        method: "POST",
+        body: formData,
+      });
+
+      const data = await readResponse(
+        response,
+        "Handwriting transcription failed."
+      );
+
+      setHandwritingResult(data);
+      const text = data.transcribed_text || "";
+      setHandwrittenText(text);
+      // Automatically initialize editedText so AI features immediately work
+      setEditedText(text);
+      setSummary("");
+      setAnswer("");
+      setInsights(null);
+    } catch (err) {
+      setHandwritingError(
+        err.message.toLowerCase().includes("fetch")
+          ? "Cannot connect to LipiQ's backend. Make sure FastAPI is running."
+          : err.message
+      );
+    } finally {
+      setHandwritingLoading(false);
+    }
+  }
+
+  async function copyHandwrittenText() {
+    const textToCopy = handwrittenText || editedText;
+    if (!textToCopy.trim()) return;
+    try {
+      await navigator.clipboard.writeText(textToCopy);
+      setHwCopied(true);
+      setTimeout(() => setHwCopied(false), 2000);
+    } catch {
+      setHandwritingError("Could not copy transcribed text to clipboard.");
+    }
+  }
+
+  function downloadHandwrittenText() {
+    const textToDownload = handwrittenText || editedText;
+    if (!textToDownload.trim()) return;
+    const blob = new Blob([textToDownload], { type: "text/plain;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = "lipiq-handwriting-transcription.txt";
+    link.click();
+    URL.revokeObjectURL(url);
+  }
+
+  function applyHandwritingToEditor() {
+    const textToApply = handwrittenText.trim() || editedText.trim();
+    if (!textToApply) return;
+    setEditedText(textToApply);
+    setSummary("");
+    setAnswer("");
+    setInsights(null);
+  }
+
   return (
     <div className="app-shell">
       <header className="topbar">
@@ -579,9 +848,32 @@ function App() {
         <nav className="top-nav">
           <a href="#workspace">Workspace</a>
           <a href="#about">About LipiQ</a>
+          <button
+            type="button"
+            className="mode-toggle"
+            onClick={() => {
+              setHandwritingMode(!handwritingMode);
+              setError("");
+              setHandwritingError("");
+            }}
+            aria-label={handwritingMode ? "Switch to printed OCR mode" : "Switch to Kannada handwriting mode"}
+            style={{
+              padding: "6px 14px",
+              borderRadius: "8px",
+              border: "1px solid #725cde",
+              background: handwritingMode ? "#725cde" : "#ffffff",
+              color: handwritingMode ? "#ffffff" : "#725cde",
+              fontWeight: 600,
+              fontSize: "12px",
+              cursor: "pointer",
+              transition: "all 0.2s ease",
+            }}
+          >
+            {handwritingMode ? "✍ Handwriting Mode" : "📄 Printed OCR"}
+          </button>
           <span className="status-pill">
             <span className="status-dot" />
-            OCR workspace
+            {handwritingMode ? "Handwriting workspace" : "OCR workspace"}
           </span>
         </nav>
       </header>
@@ -621,18 +913,30 @@ function App() {
           <div className="section-heading">
             <div>
               <p className="section-kicker">YOUR WORKSPACE</p>
-              <h2>Bring your document to life.</h2>
+              <h2>
+                {handwritingMode
+                  ? "Transcribe handwritten Kannada documents."
+                  : "Bring your document to life."}
+              </h2>
             </div>
-            <span className="step-label">01 / UPLOAD & EXTRACT</span>
+            <span className="step-label">
+              {handwritingMode ? "01 / HANDWRITING RECOGNITION" : "01 / UPLOAD & EXTRACT"}
+            </span>
           </div>
 
           <div className="upload-card">
             <div className="upload-intro">
-              <div className="upload-icon">↑</div>
+              <div className="upload-icon">{handwritingMode ? "✍" : "↑"}</div>
               <div>
-                <h3>Upload a Kannada document</h3>
+                <h3>
+                  {handwritingMode
+                    ? "Upload a handwritten Kannada document"
+                    : "Upload a Kannada document"}
+                </h3>
                 <p>
-                  Start with a clear image of a printed Kannada document.
+                  {handwritingMode
+                    ? "Choose a photo or scan of handwritten Kannada text to transcribe."
+                    : "Start with a clear image of a printed Kannada document."}
                 </p>
               </div>
             </div>
@@ -665,30 +969,515 @@ function App() {
               />
             </label>
 
-            {error && (
+            {(error || (handwritingMode && handwritingError)) && (
               <div className="error-message" role="alert">
-                {error}
+                {handwritingMode && handwritingError ? handwritingError : error}
               </div>
             )}
 
             <div className="upload-footer">
               <p>
                 <span className="privacy-icon">▣</span>
-                Your image is processed by your local OCR backend.
+                {handwritingMode
+                  ? "Image transcription uses cloud vision AI with Kannada recognition."
+                  : "Your image is processed by your local OCR backend."}
               </p>
 
-              <button
-                className="primary-button"
-                onClick={extractText}
-                disabled={!file || loading}
-              >
-                {loading ? "Extracting text..." : "Extract Kannada text"}
-                {!loading && <span>↗</span>}
-              </button>
+              {handwritingMode ? (
+                <button
+                  className="primary-button"
+                  onClick={transcribeHandwriting}
+                  disabled={!file || handwritingLoading}
+                >
+                  {handwritingLoading ? "Transcribing handwriting..." : "Transcribe Kannada handwriting"}
+                  {!handwritingLoading && <span>↗</span>}
+                </button>
+              ) : (
+                <button
+                  className="primary-button"
+                  onClick={extractText}
+                  disabled={!file || loading}
+                >
+                  {loading ? "Extracting text..." : "Extract Kannada text"}
+                  {!loading && <span>↗</span>}
+                </button>
+              )}
             </div>
           </div>
 
-          {result && (
+          {/* Handwriting Recognition Results */}
+          {handwritingResult && (
+            <section className="results-section" aria-live="polite">
+              <div className="results-heading">
+                <div>
+                  <p className="section-kicker">TRANSCRIPTION COMPLETE</p>
+                  <h2>Your handwritten document, digitized.</h2>
+                </div>
+
+                <span className="result-badge">
+                  <span className="status-dot" />
+                  Handwriting transcribed
+                </span>
+              </div>
+
+              <div className="results-grid">
+                <div className="result-panel document-panel">
+                  <div className="panel-heading">
+                    <span>01</span>
+                    <h3>Handwritten image</h3>
+                  </div>
+
+                  <div className="document-image-wrap">
+                    <div className="document-image-stage">
+                      <img
+                        src={preview}
+                        alt="Uploaded handwritten Kannada document"
+                      />
+                    </div>
+                  </div>
+
+                  <p className="panel-footnote">
+                    {handwritingResult.image_width} × {handwritingResult.image_height} pixels
+                    {handwritingResult.provider && (
+                      <span> · Powered by {handwritingResult.provider} vision</span>
+                    )}
+                  </p>
+                </div>
+
+                <div className="result-panel text-panel">
+                  <div className="panel-heading">
+                    <span>02</span>
+                    <h3>Kannada transcription</h3>
+
+                    <button
+                      className="copy-button"
+                      onClick={copyHandwrittenText}
+                      type="button"
+                    >
+                      {hwCopied ? "Copied!" : "Copy text ↗"}
+                    </button>
+                  </div>
+
+                  <p className="click-hint">
+                    Uncertain words are marked with [ಅಸ್ಪಷ್ಟ]. You can edit and refine the text below.
+                  </p>
+
+                  <div className="ocr-text" lang="kn" style={{ whiteSpace: "pre-wrap", lineHeight: 1.8 }}>
+                    {handwrittenText || (
+                      <p>No handwritten text could be transcribed. Try a clearer image.</p>
+                    )}
+                  </div>
+
+                  <div className="result-stats">
+                    <div>
+                      <strong>
+                        {(handwrittenText || "").split(/\s+/).filter(Boolean).length}
+                      </strong>
+                      <span>Words transcribed</span>
+                    </div>
+
+                    <div>
+                      <strong>{handwritingResult.lines?.length || 1}</strong>
+                      <span>Lines detected</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Editable Transcription output */}
+              <section className="result-panel" style={featurePanelStyle}>
+                <div className="panel-heading">
+                  <span>03</span>
+                  <h3>Edit transcribed text</h3>
+                </div>
+
+                <p className="click-hint">
+                  Refine handwritten transcription here. Any edits automatically flow into Document Summary, Insights, and Q&A.
+                </p>
+
+                <textarea
+                  lang="kn"
+                  aria-label="Editable handwritten Kannada text"
+                  value={editedText}
+                  onChange={(event) => {
+                    setEditedText(event.target.value);
+                    setHandwrittenText(event.target.value);
+                    setSummary("");
+                    setAnswer("");
+                  }}
+                  rows={9}
+                  placeholder="Transcribed Kannada text will appear here..."
+                  style={textAreaStyle}
+                />
+
+                <div style={actionRowStyle}>
+                  <button
+                    type="button"
+                    className="copy-button"
+                    onClick={copyHandwrittenText}
+                    disabled={!editedText.trim()}
+                  >
+                    {hwCopied ? "Copied!" : "Copy text"}
+                  </button>
+
+                  <button
+                    type="button"
+                    className="primary-button"
+                    onClick={downloadHandwrittenText}
+                    disabled={!editedText.trim()}
+                  >
+                    Download .txt ↗
+                  </button>
+
+                  <button
+                    type="button"
+                    className="primary-button"
+                    onClick={applyHandwritingToEditor}
+                    disabled={!editedText.trim()}
+                    style={{ background: "#483d8b" }}
+                  >
+                    Sync to AI features
+                  </button>
+                </div>
+              </section>
+
+              {/* AI summary for handwriting */}
+              <section className="result-panel" style={featurePanelStyle}>
+                <div className="panel-heading">
+                  <span>04</span>
+                  <h3>Document summary</h3>
+                </div>
+
+                <p className="click-hint">
+                  Generate a concise summary and key points from your transcribed handwritten text.
+                </p>
+
+                {!aiStatusChecked ? (
+                  <p role="status">Checking AI availability...</p>
+                ) : !aiConfigured ? (
+                  <p role="status">
+                    AI features are not configured. Set up a supported AI provider in the backend to enable summaries.
+                  </p>
+                ) : (
+                  <div style={actionRowStyle}>
+                    <button
+                      type="button"
+                      className="primary-button"
+                      onClick={summarizeDocument}
+                      disabled={summaryLoading || !editedText.trim()}
+                    >
+                      {summaryLoading ? "Generating summary..." : "Summarize transcription"}
+                    </button>
+                  </div>
+                )}
+
+                {summary && (
+                  <div style={outputStyle}>
+                    <h4 style={{ marginBottom: "8px" }}>Summary</h4>
+                    <p style={paragraphStyle} lang="kn">
+                      {summary}
+                    </p>
+                  </div>
+                )}
+              </section>
+
+              {/* Document Insights for handwriting */}
+              <section className="result-panel" style={featurePanelStyle}>
+                <div className="panel-heading">
+                  <span>05</span>
+                  <h3>Document Insights</h3>
+                </div>
+
+                <p className="click-hint">
+                  Extract structured metadata, dates, entities, and key points from handwritten content.
+                </p>
+
+                {!aiStatusChecked ? (
+                  <p role="status">Checking AI availability...</p>
+                ) : !aiConfigured ? (
+                  <p role="status">AI features are not configured.</p>
+                ) : (
+                  <div style={actionRowStyle}>
+                    <button
+                      type="button"
+                      className="primary-button"
+                      onClick={extractDocumentInsights}
+                      disabled={insightsLoading || !editedText.trim()}
+                    >
+                      {insightsLoading ? "Extracting insights..." : "Extract insights"}
+                    </button>
+                  </div>
+                )}
+
+                {insights && (
+                  <div style={outputStyle}>
+                    {insights.document_type && (
+                      <p><strong>Document Type:</strong> {insights.document_type}</p>
+                    )}
+                    {insights.key_points && insights.key_points.length > 0 && (
+                      <div>
+                        <h4 style={{ margin: "12px 0 8px" }}>Key Points</h4>
+                        <ul>
+                          {insights.key_points.map((pt, i) => (
+                            <li key={i} lang="kn" style={{ marginBottom: "6px" }}>{pt}</li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </section>
+
+              {/* Q&A for handwriting */}
+              <section className="result-panel" style={featurePanelStyle}>
+                <div className="panel-heading">
+                  <span>06</span>
+                  <h3>Ask questions about this document</h3>
+                </div>
+
+                <p className="click-hint">
+                  Ask any question about the transcribed handwritten text.
+                </p>
+
+                {!aiStatusChecked ? (
+                  <p role="status">Checking AI availability...</p>
+                ) : !aiConfigured ? (
+                  <p role="status">AI features are not configured.</p>
+                ) : (
+                  <form onSubmit={handleAskQuestion}>
+                    <label htmlFor="hw-question-input" style={labelStyle}>
+                      Question in English or Kannada:
+                    </label>
+
+                    <input
+                      id="hw-question-input"
+                      type="text"
+                      value={question}
+                      onChange={(e) => setQuestion(e.target.value)}
+                      placeholder="e.g. ಈ ದಾಖಲೆಯ ಮುಖ್ಯ ವಿಷಯವೇನು? / What is this document about?"
+                      style={inputStyle}
+                      disabled={answerLoading}
+                    />
+
+                    <div style={actionRowStyle}>
+                      <button
+                        type="submit"
+                        className="primary-button"
+                        disabled={answerLoading || !question.trim() || !editedText.trim()}
+                      >
+                        {answerLoading ? "Searching document..." : "Ask LipiQ"}
+                      </button>
+                    </div>
+                  </form>
+                )}
+
+                {answer && (
+                  <div style={outputStyle}>
+                    <h4 style={{ marginBottom: "8px" }}>Answer</h4>
+                    <p style={paragraphStyle} lang="kn">
+                      {answer}
+                    </p>
+                  </div>
+                )}
+              </section>
+
+              {/* LipiQ Voice Reader for Handwriting */}
+              <section className="result-panel" style={featurePanelStyle}>
+                <div className="panel-heading">
+                  <span>07</span>
+                  <h3>LipiQ Voice Reader</h3>
+                </div>
+
+                <p className="click-hint">
+                  Listen to the transcribed document or AI summary in spoken Kannada (kn-IN) or English (en-IN).
+                </p>
+
+                {/* Source and Language selectors */}
+                <div style={{ display: "flex", flexWrap: "wrap", gap: "16px", marginTop: "14px", alignItems: "center" }}>
+                  <div>
+                    <label style={{ ...labelStyle, marginBottom: "4px", fontSize: "12px", color: "#554b8c" }}>
+                      Content to read:
+                    </label>
+                    <div style={{ display: "flex", gap: "8px" }}>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setVoiceSource("document");
+                          setVoiceWarning("");
+                        }}
+                        style={{
+                          padding: "6px 12px",
+                          borderRadius: "6px",
+                          fontSize: "12px",
+                          fontWeight: "600",
+                          border: voiceSource === "document" ? "1.5px solid #725cde" : "1px solid #d8d4e8",
+                          background: voiceSource === "document" ? "#f4f0ff" : "#fff",
+                          color: voiceSource === "document" ? "#5945c5" : "#4a4658",
+                          cursor: "pointer",
+                        }}
+                      >
+                        📄 Full Document
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setVoiceSource("summary");
+                          setVoiceWarning("");
+                        }}
+                        style={{
+                          padding: "6px 12px",
+                          borderRadius: "6px",
+                          fontSize: "12px",
+                          fontWeight: "600",
+                          border: voiceSource === "summary" ? "1.5px solid #725cde" : "1px solid #d8d4e8",
+                          background: voiceSource === "summary" ? "#f4f0ff" : "#fff",
+                          color: voiceSource === "summary" ? "#5945c5" : "#4a4658",
+                          cursor: "pointer",
+                        }}
+                      >
+                        ✨ AI Summary
+                      </button>
+                    </div>
+                  </div>
+
+                  <div>
+                    <label style={{ ...labelStyle, marginBottom: "4px", fontSize: "12px", color: "#554b8c" }}>
+                      Voice Language:
+                    </label>
+                    <div style={{ display: "flex", gap: "8px" }}>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setVoiceLang("kn-IN");
+                          setVoiceWarning("");
+                        }}
+                        style={{
+                          padding: "6px 12px",
+                          borderRadius: "6px",
+                          fontSize: "12px",
+                          fontWeight: "600",
+                          border: voiceLang === "kn-IN" ? "1.5px solid #725cde" : "1px solid #d8d4e8",
+                          background: voiceLang === "kn-IN" ? "#f4f0ff" : "#fff",
+                          color: voiceLang === "kn-IN" ? "#5945c5" : "#4a4658",
+                          cursor: "pointer",
+                        }}
+                      >
+                        ಕನ್ನಡ (kn-IN)
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setVoiceLang("en-IN");
+                          setVoiceWarning("");
+                        }}
+                        style={{
+                          padding: "6px 12px",
+                          borderRadius: "6px",
+                          fontSize: "12px",
+                          fontWeight: "600",
+                          border: voiceLang === "en-IN" ? "1.5px solid #725cde" : "1px solid #d8d4e8",
+                          background: voiceLang === "en-IN" ? "#f4f0ff" : "#fff",
+                          color: voiceLang === "en-IN" ? "#5945c5" : "#4a4658",
+                          cursor: "pointer",
+                        }}
+                      >
+                        English (en-IN)
+                      </button>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Speed Slider */}
+                <div style={{ marginTop: "14px", display: "flex", alignItems: "center", gap: "12px" }}>
+                  <label htmlFor="hw-voice-speed" style={{ fontSize: "12px", fontWeight: "600", color: "#554b8c", minWidth: "90px" }}>
+                    Speed: {voiceSpeed.toFixed(2)}x
+                  </label>
+                  <input
+                    id="hw-voice-speed"
+                    type="range"
+                    min="0.75"
+                    max="1.5"
+                    step="0.05"
+                    value={voiceSpeed}
+                    onChange={(e) => handleVoiceSpeedChange(parseFloat(e.target.value))}
+                    style={{ flex: 1, maxWidth: "200px", cursor: "pointer" }}
+                  />
+                </div>
+
+                {/* Playback Controls */}
+                <div style={{ ...actionRowStyle, marginTop: "16px" }}>
+                  {!voicePlaying ? (
+                    <button
+                      type="button"
+                      className="primary-button"
+                      onClick={handleVoicePlay}
+                      disabled={voiceSource === "summary" ? !summary.trim() : !editedText.trim()}
+                      style={{ display: "inline-flex", alignItems: "center", gap: "6px" }}
+                    >
+                      <span>▶</span> Play
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      className="primary-button"
+                      onClick={handleVoicePause}
+                      style={{ display: "inline-flex", alignItems: "center", gap: "6px", background: "#f59e0b" }}
+                    >
+                      <span>⏸</span> Pause
+                    </button>
+                  )}
+
+                  {voicePaused && (
+                    <button
+                      type="button"
+                      className="copy-button"
+                      onClick={handleVoiceResume}
+                      style={{ display: "inline-flex", alignItems: "center", gap: "6px", borderColor: "#725cde", color: "#725cde" }}
+                    >
+                      <span>⏯</span> Resume
+                    </button>
+                  )}
+
+                  <button
+                    type="button"
+                    className="copy-button"
+                    onClick={stopVoiceReader}
+                    disabled={!voicePlaying && !voicePaused}
+                    style={{ display: "inline-flex", alignItems: "center", gap: "6px" }}
+                  >
+                    <span>⏹</span> Stop
+                  </button>
+
+                  {(voicePlaying || voicePaused) && (
+                    <span style={{ fontSize: "12px", color: voicePaused ? "#f59e0b" : "#25825b", fontWeight: "600" }}>
+                      {voicePaused ? "Paused" : "Speaking..."}
+                    </span>
+                  )}
+                </div>
+
+                {/* Warning message */}
+                {voiceWarning && (
+                  <div
+                    style={{
+                      marginTop: "14px",
+                      padding: "10px 14px",
+                      background: "#fff9eb",
+                      borderRadius: "8px",
+                      fontSize: "12px",
+                      color: "#b45309",
+                      border: "1px solid #fde68a",
+                    }}
+                    role="alert"
+                  >
+                    ⚠ {voiceWarning}
+                  </div>
+                )}
+              </section>
+            </section>
+          )}
+
+          {/* Printed OCR Results */}
+          {!handwritingMode && result && (
             <section className="results-section" aria-live="polite">
               <div className="results-heading">
                 <div>
@@ -1583,6 +2372,199 @@ function App() {
                         </div>
                       </div>
                     )}
+                  </div>
+                )}
+              </section>
+
+              {/* LipiQ Voice Reader for Printed OCR */}
+              <section className="result-panel" style={featurePanelStyle}>
+                <div className="panel-heading">
+                  <span>08</span>
+                  <h3>LipiQ Voice Reader</h3>
+                </div>
+
+                <p className="click-hint">
+                  Listen to the extracted document text or AI summary in spoken Kannada (kn-IN) or English (en-IN).
+                </p>
+
+                {/* Source and Language selectors */}
+                <div style={{ display: "flex", flexWrap: "wrap", gap: "16px", marginTop: "14px", alignItems: "center" }}>
+                  <div>
+                    <label style={{ ...labelStyle, marginBottom: "4px", fontSize: "12px", color: "#554b8c" }}>
+                      Content to read:
+                    </label>
+                    <div style={{ display: "flex", gap: "8px" }}>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setVoiceSource("document");
+                          setVoiceWarning("");
+                        }}
+                        style={{
+                          padding: "6px 12px",
+                          borderRadius: "6px",
+                          fontSize: "12px",
+                          fontWeight: "600",
+                          border: voiceSource === "document" ? "1.5px solid #725cde" : "1px solid #d8d4e8",
+                          background: voiceSource === "document" ? "#f4f0ff" : "#fff",
+                          color: voiceSource === "document" ? "#5945c5" : "#4a4658",
+                          cursor: "pointer",
+                        }}
+                      >
+                        📄 Full Document
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setVoiceSource("summary");
+                          setVoiceWarning("");
+                        }}
+                        style={{
+                          padding: "6px 12px",
+                          borderRadius: "6px",
+                          fontSize: "12px",
+                          fontWeight: "600",
+                          border: voiceSource === "summary" ? "1.5px solid #725cde" : "1px solid #d8d4e8",
+                          background: voiceSource === "summary" ? "#f4f0ff" : "#fff",
+                          color: voiceSource === "summary" ? "#5945c5" : "#4a4658",
+                          cursor: "pointer",
+                        }}
+                      >
+                        ✨ AI Summary
+                      </button>
+                    </div>
+                  </div>
+
+                  <div>
+                    <label style={{ ...labelStyle, marginBottom: "4px", fontSize: "12px", color: "#554b8c" }}>
+                      Voice Language:
+                    </label>
+                    <div style={{ display: "flex", gap: "8px" }}>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setVoiceLang("kn-IN");
+                          setVoiceWarning("");
+                        }}
+                        style={{
+                          padding: "6px 12px",
+                          borderRadius: "6px",
+                          fontSize: "12px",
+                          fontWeight: "600",
+                          border: voiceLang === "kn-IN" ? "1.5px solid #725cde" : "1px solid #d8d4e8",
+                          background: voiceLang === "kn-IN" ? "#f4f0ff" : "#fff",
+                          color: voiceLang === "kn-IN" ? "#5945c5" : "#4a4658",
+                          cursor: "pointer",
+                        }}
+                      >
+                        ಕನ್ನಡ (kn-IN)
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setVoiceLang("en-IN");
+                          setVoiceWarning("");
+                        }}
+                        style={{
+                          padding: "6px 12px",
+                          borderRadius: "6px",
+                          fontSize: "12px",
+                          fontWeight: "600",
+                          border: voiceLang === "en-IN" ? "1.5px solid #725cde" : "1px solid #d8d4e8",
+                          background: voiceLang === "en-IN" ? "#f4f0ff" : "#fff",
+                          color: voiceLang === "en-IN" ? "#5945c5" : "#4a4658",
+                          cursor: "pointer",
+                        }}
+                      >
+                        English (en-IN)
+                      </button>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Speed Slider */}
+                <div style={{ marginTop: "14px", display: "flex", alignItems: "center", gap: "12px" }}>
+                  <label htmlFor="ocr-voice-speed" style={{ fontSize: "12px", fontWeight: "600", color: "#554b8c", minWidth: "90px" }}>
+                    Speed: {voiceSpeed.toFixed(2)}x
+                  </label>
+                  <input
+                    id="ocr-voice-speed"
+                    type="range"
+                    min="0.75"
+                    max="1.5"
+                    step="0.05"
+                    value={voiceSpeed}
+                    onChange={(e) => handleVoiceSpeedChange(parseFloat(e.target.value))}
+                    style={{ flex: 1, maxWidth: "200px", cursor: "pointer" }}
+                  />
+                </div>
+
+                {/* Playback Controls */}
+                <div style={{ ...actionRowStyle, marginTop: "16px" }}>
+                  {!voicePlaying ? (
+                    <button
+                      type="button"
+                      className="primary-button"
+                      onClick={handleVoicePlay}
+                      disabled={voiceSource === "summary" ? !summary.trim() : !editedText.trim()}
+                      style={{ display: "inline-flex", alignItems: "center", gap: "6px" }}
+                    >
+                      <span>▶</span> Play
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      className="primary-button"
+                      onClick={handleVoicePause}
+                      style={{ display: "inline-flex", alignItems: "center", gap: "6px", background: "#f59e0b" }}
+                    >
+                      <span>⏸</span> Pause
+                    </button>
+                  )}
+
+                  {voicePaused && (
+                    <button
+                      type="button"
+                      className="copy-button"
+                      onClick={handleVoiceResume}
+                      style={{ display: "inline-flex", alignItems: "center", gap: "6px", borderColor: "#725cde", color: "#725cde" }}
+                    >
+                      <span>⏯</span> Resume
+                    </button>
+                  )}
+
+                  <button
+                    type="button"
+                    className="copy-button"
+                    onClick={stopVoiceReader}
+                    disabled={!voicePlaying && !voicePaused}
+                    style={{ display: "inline-flex", alignItems: "center", gap: "6px" }}
+                  >
+                    <span>⏹</span> Stop
+                  </button>
+
+                  {(voicePlaying || voicePaused) && (
+                    <span style={{ fontSize: "12px", color: voicePaused ? "#f59e0b" : "#25825b", fontWeight: "600" }}>
+                      {voicePaused ? "Paused" : "Speaking..."}
+                    </span>
+                  )}
+                </div>
+
+                {/* Warning message */}
+                {voiceWarning && (
+                  <div
+                    style={{
+                      marginTop: "14px",
+                      padding: "10px 14px",
+                      background: "#fff9eb",
+                      borderRadius: "8px",
+                      fontSize: "12px",
+                      color: "#b45309",
+                      border: "1px solid #fde68a",
+                    }}
+                    role="alert"
+                  >
+                    ⚠ {voiceWarning}
                   </div>
                 )}
               </section>

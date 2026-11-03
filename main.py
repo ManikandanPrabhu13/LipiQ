@@ -745,6 +745,137 @@ def extract_insights(request: InsightsRequest):
 
 
 # --------------------------------------------------
+# KANNADA HANDWRITING RECOGNITION
+# --------------------------------------------------
+
+@app.post("/api/handwriting", response_model=dict)
+async def handwriting_recognition(
+    file: UploadFile = File(...),
+):
+    """Kannada Handwriting Recognition endpoint.
+
+    Accepts a handwritten document image and returns transcribed text.
+    Uses Gemini Vision for image-to-text recognition.
+    Uncertain words are marked as [ಅಸ್ಪಷ್ಟ] instead of guessed.
+    """
+    import io as _io
+    from PIL import Image as _Image
+
+    # Validate content type.
+    if file.content_type not in ALLOWED_TYPES:
+        raise HTTPException(
+            status_code=415,
+            detail="Upload a JPG, PNG, or WebP handwritten image.",
+        )
+
+    # Read at most 10 MB.
+    content = await file.read(MAX_FILE_SIZE + 1)
+
+    if len(content) > MAX_FILE_SIZE:
+        raise HTTPException(
+            status_code=413,
+            detail="File exceeds the 10 MB limit.",
+        )
+
+    if not content:
+        raise HTTPException(
+            status_code=400,
+            detail="Empty file.",
+        )
+
+    # Decode the uploaded image safely.
+    try:
+        image = _Image.open(_io.BytesIO(content))
+        image.load()
+        image = ImageOps.exif_transpose(image)
+        image = image.convert("RGB")
+    except (UnidentifiedImageError, OSError):
+        raise HTTPException(
+            status_code=400,
+            detail="The uploaded file is not a valid supported image.",
+        )
+
+    width, height = image.size
+
+    # Try Gemini Vision first (supports image input).
+    from ai_service import (
+        AIRequestError,
+        AIUnavailableError,
+        get_providers,
+        _gemini_vision_generate,
+    )
+
+    providers = get_providers()
+    gemini_provider = None
+
+    for p in providers:
+        if p.name == "gemini" and p.api_key:
+            gemini_provider = p
+            break
+
+    if gemini_provider is None:
+        raise HTTPException(
+            status_code=503,
+            detail="No Gemini Vision API key configured. Add GEMINI_API_KEY to .env.",
+        )
+
+    # Build a Gemini Vision prompt asking for handwritten Kannada transcription.
+    system_prompt = (
+        "You are LipiQ's handwriting recognition assistant. "
+        "Transcribe the handwritten Kannada text into clean digital text. "
+        "Preserve paragraphs, line breaks, and the overall structure. "
+        "If a word is uncertain or cannot be confidently recognized, "
+        "mark it with [ಅಸ್ಪಷ್ಟ] inside the transcription rather than guessing. "
+        "Output only the transcribed text — do not include analysis, notes, or apologies."
+    )
+
+    user_prompt = (
+        "Transcribe this handwritten Kannada document into digital text. "
+        "Preserve paragraphs and line breaks. Mark uncertain words with [ಅಸ್ಪಷ್ಟ]."
+    )
+
+    # Re-encode the decoded image back to PNG bytes for the Gemini request.
+    import io as _io2
+    from PIL import Image as _Image
+
+    png_buffer = _io2.BytesIO()
+    image.save(png_buffer, format="PNG")
+    image_bytes = png_buffer.getvalue()
+
+    # Build a data URI for the UI to render the original image.
+    import base64 as _base64
+    image_data_url = _base64.b64encode(image_bytes).decode("utf-8")
+    image_data_url = f"data:image/png;base64,{image_data_url}"
+
+    try:
+        transcribed = _gemini_vision_generate(
+            gemini_provider,
+            image_bytes,
+            "image/png",
+            user_prompt,
+            system_prompt,
+            max_tokens=800,
+        )
+    except (AIRequestError, AIUnavailableError) as e:
+        raise HTTPException(
+            status_code=502,
+            detail=f"Gemini Vision recognition failed: {str(e)[:400]}",
+        )
+
+    # The Gemini output is a single block; split into lines preserving any
+    # [ಅಸ್ಪಷ್ಟ] markers. Also emit the total character count for the UI.
+    lines = [ln.strip() for ln in transcribed.split("\n") if ln.strip()]
+
+    return {
+        "transcribed_text": transcribed,
+        "lines": lines,
+        "image_width": width,
+        "image_height": height,
+        "provider": "gemini",
+    }
+
+
+# --------------------------------------------------
 # SMART OCR CORRECTION
 # --------------------------------------------------
 

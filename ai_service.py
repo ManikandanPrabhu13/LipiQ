@@ -256,6 +256,76 @@ def _gemini_generate(
     return answer.strip()
 
 
+def _gemini_vision_generate(
+    provider: AIProvider,
+    image_bytes: bytes,
+    image_mime_type: str,
+    user_prompt: str,
+    system_prompt: str,
+    max_tokens: int,
+) -> str:
+    """Generate text from an image using Gemini Vision.
+
+    Accepts raw image bytes (already decoded by the caller) and sends them
+    as an inline base64 data URI in the Gemini generateContent request.
+    """
+    import base64 as _base64
+
+    image_data = _base64.b64encode(image_bytes).decode("utf-8")
+
+    url = (
+        f"{GEMINI_URL}/{provider.model}:generateContent"
+        f"?key={provider.api_key}"
+    )
+
+    payload = {
+        "systemInstruction": {
+            "parts": [{"text": system_prompt}]
+        },
+        "contents": [
+            {
+                "role": "user",
+                "parts": [
+                    {
+                        "text": user_prompt,
+                    },
+                    {
+                        "inline_data": {
+                            "mime_type": image_mime_type,
+                            "data": image_data,
+                        }
+                    },
+                ],
+            }
+        ],
+        "generationConfig": {
+            "temperature": 0.2,
+            "maxOutputTokens": max_tokens,
+        },
+    }
+
+    response = requests.post(
+        url,
+        json=payload,
+        timeout=REQUEST_TIMEOUT_SECONDS,
+    )
+
+    _check_response(response, provider.name)
+
+    try:
+        data = response.json()
+        answer = data["candidates"][0]["content"]["parts"][0]["text"]
+    except (ValueError, KeyError, IndexError, TypeError) as exc:
+        raise AIRequestError(
+            f"Gemini Vision returned an invalid response: {exc}"
+        ) from exc
+
+    if not isinstance(answer, str) or not answer.strip():
+        raise AIRequestError("Gemini Vision returned an empty response")
+
+    return answer.strip()
+
+
 def _ollama_generate(
     provider: AIProvider,
     prompt: str,

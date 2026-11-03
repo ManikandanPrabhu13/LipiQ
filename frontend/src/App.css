@@ -563,6 +563,35 @@
   font-size: 10px;
 }
 
+/* -------------------------------------------
+   Kannada Handwriting Recognition UI
+------------------------------------------- */
+
+.mode-toggle {
+  background: #fff;
+  border: 1px solid #d8d4e8;
+  border-radius: 10px;
+  color: #252238;
+  fontSize: 0.9rem;
+  padding: 6px 16px;
+  cursor: pointer;
+  fontWeight: 600;
+}
+
+.handwriting-workspace .upload-card {
+  margin-bottom: 32px;
+}
+
+.loading-indicator {
+  fontSize: 1.1rem;
+  letterSpacing: 2px;
+}
+
+.results-section .ocr-word.selected {
+  background: #f7e9ff;
+  color: #5a4ce8;
+}
+
 /* Footer */
 
 .footer {

@@ -26,7 +26,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-REQUEST_TIMEOUT_SECONDS = 60
+REQUEST_TIMEOUT_SECONDS = 30
 
 GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
 OPENAI_URL = "https://api.openai.com/v1/chat/completions"
@@ -60,7 +60,11 @@ def get_providers() -> list[AIProvider]:
 
     defaults = {
         "gemini": "gemini-3.8-flash",
-        "groq": "llama-3.3-70b-versatile",
+        # llama-3.1-8b-instant is 3-5× faster than the 70b model on Groq's
+        # free tier and produces high-quality results for summarisation,
+        # insights, and Q&A on document-length input.
+        # Override with GROQ_MODEL=llama-3.3-70b-versatile in .env if needed.
+        "groq": "llama-3.1-8b-instant",
         "openai": "gpt-4.1-mini",
         "openrouter": "openrouter/auto",
         "ollama": "llama3.2",

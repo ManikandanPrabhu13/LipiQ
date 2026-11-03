@@ -158,6 +158,18 @@ async def extract_document(
         image = ImageOps.exif_transpose(image)
         image = image.convert("RGB")
 
+        # Resize large images before OCR to reduce Tesseract processing time.
+        # Cap the longest edge at 2000 px while preserving aspect ratio.
+        # Kannada akshara readability is maintained well above ~150 DPI
+        # (roughly 1500 px for an A4 page). For images already within the
+        # threshold this is a no-op.
+        _MAX_OCR_EDGE = 2000
+        orig_w, orig_h = image.size
+        if max(orig_w, orig_h) > _MAX_OCR_EDGE:
+            scale = _MAX_OCR_EDGE / max(orig_w, orig_h)
+            new_size = (int(orig_w * scale), int(orig_h * scale))
+            image = image.resize(new_size, Image.LANCZOS)
+
     except (UnidentifiedImageError, OSError):
         raise HTTPException(
             status_code=400,
@@ -362,7 +374,7 @@ def summarize_document(request: DocumentTextRequest):
         f"{request.text}\n>>>"
     )
 
-    result = _run_ai(prompt, max_tokens=700)
+    result = _run_ai(prompt, max_tokens=450)
 
     return {
         "summary": result["answer"],
@@ -618,7 +630,7 @@ def extract_insights(request: InsightsRequest):
         f"{request.text}\n>>>"
     )
 
-    result = _run_ai(user_prompt, max_tokens=800)
+    result = _run_ai(user_prompt, max_tokens=650)
     raw_answer = result["answer"].strip()
 
     # Clean markdown block wrappers if present
@@ -798,6 +810,16 @@ async def handwriting_recognition(
         raise HTTPException(
             status_code=400,
             detail="The uploaded file is not a valid supported image.",
+        )
+
+    # Resize very large images before sending to Gemini Vision to reduce
+    # payload size and latency. Cap the longest edge at 2000 px.
+    _MAX_HW_EDGE = 2000
+    _hw_w, _hw_h = image.size
+    if max(_hw_w, _hw_h) > _MAX_HW_EDGE:
+        _scale = _MAX_HW_EDGE / max(_hw_w, _hw_h)
+        image = image.resize(
+            (int(_hw_w * _scale), int(_hw_h * _scale)), Image.LANCZOS
         )
 
     width, height = image.size

@@ -1327,7 +1327,7 @@ function App() {
                     <button
                       type="button"
                       className="primary-button"
-                      onClick={summarizeDocument}
+                      onClick={generateSummary}
                       disabled={summaryLoading || !editedText.trim()}
                     >
                       {summaryLoading ? "Generating summary..." : "Summarize transcription"}
@@ -1382,7 +1382,7 @@ function App() {
                     <button
                       type="button"
                       className="primary-button"
-                      onClick={extractDocumentInsights}
+                      onClick={generateInsights}
                       disabled={insightsLoading || !editedText.trim()}
                     >
                       {insightsLoading ? "Extracting insights..." : "Extract insights"}
@@ -1400,7 +1400,7 @@ function App() {
                         <h4 style={{ margin: "12px 0 8px" }}>Key Points</h4>
                         <ul>
                           {insights.key_points.map((pt, i) => (
-                            <li key={i} lang="kn" style={{ marginBottom: "6px" }}>{pt}</li>
+                            <li key={i} lang="kn" style={{ marginBottom: "6px" }}>{typeof pt === 'object' && pt !== null ? (pt.text || JSON.stringify(pt)) : pt}</li>
                           ))}
                         </ul>
                       </div>
@@ -1425,7 +1425,7 @@ function App() {
                 ) : !aiConfigured ? (
                   <p role="status">AI features are not configured.</p>
                 ) : (
-                  <form onSubmit={handleAskQuestion}>
+                  <form onSubmit={askQuestion}>
                     <label htmlFor="hw-question-input" style={labelStyle}>
                       Question in English or Kannada:
                     </label>

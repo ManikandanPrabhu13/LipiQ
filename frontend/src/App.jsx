@@ -509,13 +509,22 @@ function App() {
       const formData = new FormData();
       formData.append("file", file);
 
-      const response = await fetch(
-        `${API_BASE}/api/extract?psm=6`,
-        {
-          method: "POST",
-          body: formData,
-        }
-      );
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 60000); // 60s timeout
+
+      let response;
+      try {
+        response = await fetch(
+          `${API_BASE}/api/extract?psm=6`,
+          {
+            method: "POST",
+            body: formData,
+            signal: controller.signal,
+          }
+        );
+      } finally {
+        clearTimeout(timeoutId);
+      }
 
       const data = await readResponse(
         response,
@@ -530,11 +539,13 @@ function App() {
       setSyncedText(initialExtracted);
       setSyncStatus("synced");
     } catch (err) {
-      setError(
-        err.message.toLowerCase().includes("fetch")
-          ? "Cannot connect to LipiQ's backend. Make sure FastAPI is running."
-          : err.message
-      );
+      let msg = err.message || "";
+      if (err.name === "AbortError") {
+        msg = "Document extraction timed out after 60s. The server is processing under high load; please retry or try a smaller image crop.";
+      } else if (msg.toLowerCase().includes("fetch")) {
+        msg = `Cannot connect to LipiQ's backend at ${API_BASE}. Make sure FastAPI is running and awake.`;
+      }
+      setError(msg);
     } finally {
       setLoading(false);
       setExtractProgress("");

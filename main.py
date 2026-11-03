@@ -1,9 +1,13 @@
+import os
+# Bound Tesseract OpenMP threads to 1 on single-vCPU containers to prevent CPU thrashing
+os.environ.setdefault("OMP_THREAD_LIMIT", "1")
+os.environ.setdefault("OMP_NUM_THREADS", "1")
+
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
 from io import BytesIO
 import json
 import re
-import os
 from pathlib import Path
 
 import pytesseract
@@ -53,11 +57,15 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=[
         "http://localhost:5173",
+        "http://localhost:3000",
+        "http://127.0.0.1:5173",
+        "http://127.0.0.1:3000",
         "https://lipiq-frontend.vercel.app",
     ],
+    allow_origin_regex=r"https://.*lipiq.*\.vercel\.app",
     allow_credentials=False,
-    allow_methods=["GET", "POST"],
-    allow_headers=["Content-Type"],
+    allow_methods=["GET", "POST", "OPTIONS"],
+    allow_headers=["Content-Type", "Accept", "Authorization"],
 )
 
 
@@ -139,12 +147,15 @@ def _execute_tesseract_ocr(content: bytes, psm: int) -> tuple[dict, int, int]:
         # Convert to single-channel 8-bit grayscale for Tesseract
         image = image.convert("L")
 
-        _MAX_OCR_EDGE = 2000
+        # Cap maximum dimension to 1200px to maintain high Kannada recognition
+        # fidelity (~200 DPI for standard documents) while preventing CPU exhaustion
+        # and request timeouts on constrained hosting environments (e.g. Render 0.5 CPU).
+        _MAX_OCR_EDGE = 1200
         orig_w, orig_h = image.size
         if max(orig_w, orig_h) > _MAX_OCR_EDGE:
             scale = _MAX_OCR_EDGE / max(orig_w, orig_h)
             new_size = (int(orig_w * scale), int(orig_h * scale))
-            image = image.resize(new_size, Image.LANCZOS)
+            image = image.resize(new_size, Image.Resampling.LANCZOS)
 
     except (UnidentifiedImageError, OSError):
         raise HTTPException(
